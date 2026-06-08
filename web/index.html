@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+
+    <!-- ─── Primary Meta Tags ────────────────────────────────────────── -->
+    <title>Zaxo - Message & Call Freely</title>
+    <meta name="title" content="Zaxo - Message & Call Freely">
+    <meta name="description" content="Message & Call Freely. 100% Free Forever. Secure, fast, and beautiful messaging app.">
+    <meta name="author" content="Zaxo">
+    <meta name="theme-color" content="#7C3AED">
+    <meta name="background-color" content="#0F0F1A">
+
+    <!-- ─── PWA Configuration ────────────────────────────────────────── -->
+    <link rel="manifest" href="manifest.json">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="Zaxo">
+    <meta name="application-name" content="Zaxo">
+    <meta name="msapplication-TileColor" content="#7C3AED">
+    <meta name="msapplication-navbutton-color" content="#7C3AED">
+
+    <!-- ─── Icons ────────────────────────────────────────────────────── -->
+    <link rel="icon" type="image/png" sizes="32x32" href="icons/icon-32.png">
+    <link rel="icon" type="image/png" sizes="192x192" href="icons/icon-192.png">
+    <link rel="apple-touch-icon" href="icons/icon-192.png">
+    <link rel="apple-touch-icon" sizes="152x152" href="icons/icon-152.png">
+    <link rel="apple-touch-icon" sizes="180x180" href="icons/icon-180.png">
+
+    <!-- ─── Open Graph / Social ──────────────────────────────────────── -->
+    <meta property="og:type" content="website">
+    <meta property="og:url" content="https://zaxo.eu.cc/">
+    <meta property="og:title" content="Zaxo - Message & Call Freely">
+    <meta property="og:description" content="Message & Call Freely. 100% Free Forever.">
+    <meta property="og:image" content="https://zaxo.eu.cc/icons/icon-512.png">
+
+    <!-- ─── Twitter Card ─────────────────────────────────────────────── -->
+    <meta property="twitter:card" content="summary_large_image">
+    <meta property="twitter:url" content="https://zaxo.eu.cc/">
+    <meta property="twitter:title" content="Zaxo - Message & Call Freely">
+    <meta property="twitter:description" content="Message & Call Freely. 100% Free Forever.">
+    <meta property="twitter:image" content="https://zaxo.eu.cc/icons/icon-512.png">
+
+    <!-- ─── Preload Critical Resources ───────────────────────────────── -->
+    <link rel="preload" href="flutter.js" as="script">
+
+    <!-- ─── Splash Screen Styles ─────────────────────────────────────── -->
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        html, body {
+            height: 100%;
+            width: 100%;
+            overflow: hidden;
+            background-color: #0F0F1A;
+            font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, Roboto, sans-serif;
+        }
+
+        #splash-screen {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            background-color: #0F0F1A;
+            z-index: 9999;
+            transition: opacity 0.4s ease-out;
+        }
+
+        #splash-screen.fade-out {
+            opacity: 0;
+            pointer-events: none;
+        }
+
+        .splash-logo {
+            width: 120px;
+            height: 120px;
+            border-radius: 28px;
+            background: linear-gradient(135deg, #7C3AED 0%, #A78BFA 100%);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin-bottom: 24px;
+            box-shadow: 0 20px 60px rgba(124, 58, 237, 0.3);
+        }
+
+        .splash-logo svg {
+            width: 60px;
+            height: 60px;
+        }
+
+        .splash-title {
+            font-size: 32px;
+            font-weight: 700;
+            color: #FFFFFF;
+            letter-spacing: -0.5px;
+            margin-bottom: 8px;
+        }
+
+        .splash-subtitle {
+            font-size: 14px;
+            color: rgba(255, 255, 255, 0.6);
+            font-weight: 400;
+            letter-spacing: 0.5px;
+        }
+
+        .splash-loader {
+            margin-top: 48px;
+            width: 40px;
+            height: 40px;
+            border: 3px solid rgba(124, 58, 237, 0.2);
+            border-top-color: #7C3AED;
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        @media (prefers-reduced-motion: reduce) {
+            .splash-loader {
+                animation: none;
+                border-top-color: #7C3AED;
+            }
+        }
+    </style>
+</head>
+<body>
+
+    <!-- ─── Splash Screen ────────────────────────────────────────────── -->
+    <div id="splash-screen">
+        <div class="splash-logo">
+            <!-- Zaxo chat bubble icon -->
+            <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path d="M20 2H4C2.9 2 2 2.9 2 4V22L6 18H20C21.1 18 22 17.1 22 16V4C22 2.9 21.1 2 20 2ZM20 16H5.17L4 17.17V4H20V16ZM7 9H17V11H7V9ZM7 6H17V8H7V6ZM7 12H13V14H7V12Z" fill="white"/>
+            </svg>
+        </div>
+        <div class="splash-title">Zaxo</div>
+        <div class="splash-subtitle">Message & Call Freely</div>
+        <div class="splash-loader"></div>
+    </div>
+
+    <!-- ─── Flutter App Container ────────────────────────────────────── -->
+    <div id="app"></div>
+
+    <!-- ─── Flutter Initialization ───────────────────────────────────── -->
+    <script>
+        // Service worker registration
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', function () {
+                navigator.serviceWorker.register('flutter_service_worker.js');
+            });
+        }
+
+        // Flutter app initialization
+        _flutter = {};
+        _flutter.buildConfig = {};
+
+        _flutter.loader = {
+            loadEntrypoint: function (options) {
+                var script = document.createElement('script');
+                script.src = 'main.dart.js';
+                script.type = 'application/javascript';
+
+                if (options && options.onEntrypointLoaded) {
+                    script.onload = function () {
+                        options.onEntrypointLoaded(engineInitializer);
+                    };
+                }
+
+                document.body.appendChild(script);
+            },
+
+            didCreateEngineInitializer: function (initializer) {
+                engineInitializer = initializer;
+
+                // Initialize the engine
+                initializer.initializeEngine({
+                    hostElement: document.getElementById('app'),
+                    fontFallbacksAdmin: [],
+                }).then(function (appRunner) {
+                    return appRunner.runApp();
+                }).then(function () {
+                    // Remove splash screen after app loads
+                    var splash = document.getElementById('splash-screen');
+                    if (splash) {
+                        splash.classList.add('fade-out');
+                        setTimeout(function () {
+                            splash.remove();
+                        }, 500);
+                    }
+                });
+            }
+        };
+
+        var engineInitializer = null;
+
+        // Load Flutter
+        var flutterScript = document.createElement('script');
+        flutterScript.src = 'flutter.js';
+        flutterScript.onload = function () {
+            _flutter.loader.loadEntrypoint({
+                onEntrypointLoaded: function (initializer) {
+                    initializer.initializeEngine().then(function (appRunner) {
+                        return appRunner.runApp();
+                    }).then(function () {
+                        var splash = document.getElementById('splash-screen');
+                        if (splash) {
+                            splash.classList.add('fade-out');
+                            setTimeout(function () { splash.remove(); }, 500);
+                        }
+                    });
+                }
+            });
+        };
+        document.body.appendChild(flutterScript);
+    </script>
+</body>
+</html>

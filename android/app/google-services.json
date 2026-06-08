@@ -1,0 +1,39 @@
+{
+  "project_info": {
+    "project_number": "607239970175",
+    "project_id": "zaxoeucc",
+    "storage_bucket": "zaxoeucc.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:607239970175:android:8f30b284e3f2c490bbce4a",
+        "android_client_info": {
+          "package_name": "com.zaxo.app"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "607239970175.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBbmanQkwIbwwBeL34J2vy6eEB3VkOq2YM"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "607239970175.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
