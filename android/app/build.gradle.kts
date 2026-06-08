@@ -1,6 +1,5 @@
 import java.util.Properties
 import java.io.FileInputStream
-import com.android.build.api.dsl.ApplicationExtension
 
 plugins {
     id("com.android.application")
@@ -9,7 +8,7 @@ plugins {
     id("org.jetbrains.kotlin.android")
 }
 
-configure<ApplicationExtension> {
+android {
     namespace = "com.zaxo.app"
     compileSdk = 35
 
@@ -17,6 +16,10 @@ configure<ApplicationExtension> {
         isCoreLibraryDesugaringEnabled = true
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
+    }
+
+    kotlinOptions {
+        jvmTarget = "17"
     }
 
     defaultConfig {
@@ -52,12 +55,6 @@ configure<ApplicationExtension> {
                 "META-INF/*.kotlin_module"
             )
         }
-    }
-}
-
-kotlin {
-    compilerOptions {
-        jvmTarget = org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17
     }
 }
 

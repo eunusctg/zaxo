@@ -1,8 +1,12 @@
 import 'dart:async';
+
 import 'package:flutter/material.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
 import 'package:zaxo/core/constants/app_colors.dart';
-import 'package:zaxo/core/constants/app_dimensions.dart';
+import 'package:zaxo/presentation/blocs/call/call_bloc.dart';
+import 'package:zaxo/presentation/blocs/call/call_event.dart';
+import 'package:zaxo/presentation/blocs/call/call_state.dart';
 import 'package:zaxo/presentation/widgets/profile_avatar.dart';
 
 class AudioCallScreen extends StatefulWidget {
@@ -13,14 +17,15 @@ class AudioCallScreen extends StatefulWidget {
   State<AudioCallScreen> createState() => _AudioCallScreenState();
 }
 
-class _AudioCallScreenState extends State<AudioCallScreen> with TickerProviderStateMixin {
+class _AudioCallScreenState extends State<AudioCallScreen>
+    with TickerProviderStateMixin {
   late AnimationController _pulseController;
   late AnimationController _rippleController;
   Timer? _durationTimer;
   int _callDuration = 0;
-  String _callStatus = 'Calling...';
   bool _isMuted = false;
   bool _isSpeaker = false;
+  bool _isBluetooth = false;
 
   @override
   void initState() {
@@ -35,15 +40,12 @@ class _AudioCallScreenState extends State<AudioCallScreen> with TickerProviderSt
       vsync: this,
       duration: const Duration(milliseconds: 2000),
     )..repeat();
+  }
 
-    // Simulate call connection
-    Future.delayed(const Duration(seconds: 2), () {
-      if (mounted) {
-        setState(() => _callStatus = 'Connected');
-        _durationTimer = Timer.periodic(const Duration(seconds: 1), (_) {
-          if (mounted) setState(() => _callDuration++);
-        });
-      }
+  void _startDurationTimer() {
+    _durationTimer?.cancel();
+    _durationTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (mounted) setState(() => _callDuration++);
     });
   }
 
@@ -63,146 +65,185 @@ class _AudioCallScreenState extends State<AudioCallScreen> with TickerProviderSt
 
   void _endCall() {
     _durationTimer?.cancel();
+    final state = context.read<CallBloc>().state;
+    if (state is CallOngoing) {
+      context.read<CallBloc>().add(CallEnded(callId: state.callId));
+    }
     context.pop();
   }
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: AppColors.background,
-      body: SafeArea(
-        child: Column(
-          children: [
-            const SizedBox(height: 60),
+    return BlocConsumer<CallBloc, CallState>(
+      listener: (context, state) {
+        if (state is CallOngoing) {
+          // Call is connected — start duration timer
+          if (_durationTimer == null || !_durationTimer!.isActive) {
+            _startDurationTimer();
+          }
+        }
+        if (state is CallEndedState) {
+          _durationTimer?.cancel();
+          context.pop();
+        }
+      },
+      builder: (context, state) {
+        final callState = state;
+        final isConnected = callState is CallOngoing;
 
-            // Avatar with pulse animation
-            Stack(
-              alignment: Alignment.center,
+        final callStatusText = isConnected ? _formattedDuration : 'Calling...';
+
+        // Determine the other user name
+        String otherUserName = 'User';
+        if (callState is CallOutgoing) {
+          otherUserName = callState.receiver.name;
+        } else if (callState is CallOngoing) {
+          // We don't have the receiver name in CallOngoing, use chatId as fallback
+          otherUserName = widget.chatId;
+        }
+
+        return Scaffold(
+          backgroundColor: AppColors.background,
+          body: SafeArea(
+            child: Column(
               children: [
-                // Ripple effect
-                AnimatedBuilder(
-                  animation: _rippleController,
-                  builder: (context, child) {
-                    return CustomPaint(
-                      size: const Size(180, 180),
-                      painter: _RipplePainter(
-                        animation: _rippleController,
-                        color: AppColors.primary.withValues(alpha: 0.2),
-                      ),
-                    );
-                  },
-                ),
+                const SizedBox(height: 60),
 
-                // Pulse avatar
-                AnimatedBuilder(
-                  animation: _pulseController,
-                  builder: (context, child) {
-                    final scale = 1.0 + _pulseController.value * 0.05;
-                    return Transform.scale(
-                      scale: scale,
-                      child: Container(
-                        decoration: BoxDecoration(
-                          shape: BoxShape.circle,
-                          boxShadow: [
-                            BoxShadow(
-                              color: AppColors.primary.withValues(alpha: 0.3),
-                              blurRadius: 30,
-                              spreadRadius: 5,
+                // Avatar with pulse animation
+                Stack(
+                  alignment: Alignment.center,
+                  children: [
+                    // Ripple effect
+                    AnimatedBuilder(
+                      animation: _rippleController,
+                      builder: (context, child) {
+                        return CustomPaint(
+                          size: const Size(180, 180),
+                          painter: _RipplePainter(
+                            animation: _rippleController,
+                            color: AppColors.primary.withValues(alpha: 0.2),
+                          ),
+                        );
+                      },
+                    ),
+
+                    // Pulse avatar
+                    AnimatedBuilder(
+                      animation: _pulseController,
+                      builder: (context, child) {
+                        final scale = 1.0 + _pulseController.value * 0.05;
+                        return Transform.scale(
+                          scale: scale,
+                          child: Container(
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              boxShadow: [
+                                BoxShadow(
+                                  color: AppColors.primary.withValues(alpha: 0.3),
+                                  blurRadius: 30,
+                                  spreadRadius: 5,
+                                ),
+                              ],
                             ),
-                          ],
-                        ),
-                        child: const ProfileAvatar(
-                          name: 'Sarah Wilson',
-                          size: AvatarSize.xl,
-                        ),
-                      ),
-                    );
-                  },
-                ),
-              ],
-            ),
-
-            const SizedBox(height: 32),
-
-            // Name
-            const Text(
-              'Sarah Wilson',
-              style: TextStyle(
-                color: Colors.white,
-                fontSize: 28,
-                fontWeight: FontWeight.w700,
-                fontFamily: 'Outfit',
-              ),
-            ),
-
-            const SizedBox(height: 8),
-
-            // Status
-            Text(
-              _callStatus == 'Connected' ? _formattedDuration : _callStatus,
-              style: TextStyle(
-                color: AppColors.textSecondary,
-                fontSize: 16,
-              ),
-            ),
-
-            const Spacer(),
-
-            // Call controls
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 40),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                children: [
-                  _CallControlButton(
-                    icon: _isMuted ? Icons.mic_off : Icons.mic,
-                    label: _isMuted ? 'Unmute' : 'Mute',
-                    isActive: _isMuted,
-                    onPressed: () => setState(() => _isMuted = !_isMuted),
-                  ),
-                  _CallControlButton(
-                    icon: _isSpeaker ? Icons.volume_up : Icons.volume_up_outlined,
-                    label: 'Speaker',
-                    isActive: _isSpeaker,
-                    onPressed: () => setState(() => _isSpeaker = !_isSpeaker),
-                  ),
-                  _CallControlButton(
-                    icon: Icons.bluetooth,
-                    label: 'Bluetooth',
-                    isActive: false,
-                    onPressed: () {},
-                  ),
-                ],
-              ),
-            ),
-
-            const SizedBox(height: 40),
-
-            // End call button
-            GestureDetector(
-              onTap: _endCall,
-              child: Container(
-                width: 64,
-                height: 64,
-                decoration: BoxDecoration(
-                  color: AppColors.error,
-                  shape: BoxShape.circle,
-                  boxShadow: [
-                    BoxShadow(
-                      color: AppColors.error.withValues(alpha: 0.4),
-                      blurRadius: 20,
-                      spreadRadius: 2,
+                            child: ProfileAvatar(
+                              name: otherUserName,
+                              size: AvatarSize.xl,
+                            ),
+                          ),
+                        );
+                      },
                     ),
                   ],
                 ),
-                child: const Icon(Icons.call_end, color: Colors.white, size: 28),
-              ),
-            ),
 
-            const SizedBox(height: 48),
-          ],
-        ),
-      ),
+                const SizedBox(height: 32),
+
+                // Name
+                Text(
+                  otherUserName,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 28,
+                    fontWeight: FontWeight.w700,
+                    fontFamily: 'Outfit',
+                  ),
+                ),
+
+                const SizedBox(height: 8),
+
+                // Status
+                Text(
+                  callStatusText,
+                  style: TextStyle(
+                    color: AppColors.textSecondary,
+                    fontSize: 16,
+                  ),
+                ),
+
+                const Spacer(),
+
+                // Call controls
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 40),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                    children: [
+                      _CallControlButton(
+                        icon: _isMuted ? Icons.mic_off : Icons.mic,
+                        label: _isMuted ? 'Unmute' : 'Mute',
+                        isActive: _isMuted,
+                        onPressed: () => setState(() => _isMuted = !_isMuted),
+                      ),
+                      _CallControlButton(
+                        icon: _isSpeaker
+                            ? Icons.volume_up
+                            : Icons.volume_up_outlined,
+                        label: 'Speaker',
+                        isActive: _isSpeaker,
+                        onPressed: () =>
+                            setState(() => _isSpeaker = !_isSpeaker),
+                      ),
+                      _CallControlButton(
+                        icon: Icons.bluetooth,
+                        label: 'Bluetooth',
+                        isActive: _isBluetooth,
+                        onPressed: () =>
+                            setState(() => _isBluetooth = !_isBluetooth),
+                      ),
+                    ],
+                  ),
+                ),
+
+                const SizedBox(height: 40),
+
+                // End call button
+                GestureDetector(
+                  onTap: _endCall,
+                  child: Container(
+                    width: 64,
+                    height: 64,
+                    decoration: BoxDecoration(
+                      color: AppColors.error,
+                      shape: BoxShape.circle,
+                      boxShadow: [
+                        BoxShadow(
+                          color: AppColors.error.withValues(alpha: 0.4),
+                          blurRadius: 20,
+                          spreadRadius: 2,
+                        ),
+                      ],
+                    ),
+                    child:
+                        const Icon(Icons.call_end, color: Colors.white, size: 28),
+                  ),
+                ),
+
+                const SizedBox(height: 48),
+              ],
+            ),
+          ),
+        );
+      },
     );
   }
 }
@@ -235,7 +276,9 @@ class _CallControlButton extends StatelessWidget {
                   : AppColors.surfaceVariant,
               shape: BoxShape.circle,
             ),
-            child: Icon(icon, color: isActive ? Colors.white : AppColors.textSecondary, size: 22),
+            child: Icon(icon,
+                color: isActive ? Colors.white : AppColors.textSecondary,
+                size: 22),
           ),
           const SizedBox(height: 6),
           Text(
