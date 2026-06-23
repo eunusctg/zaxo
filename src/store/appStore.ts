@@ -13,6 +13,7 @@ import {
 } from "@/lib/zaxo/mockData";
 import { realtime } from "@/lib/zaxo/realtime";
 import { notifications } from "@/lib/zaxo/notifications";
+import { callHistorySync } from "@/lib/zaxo/callHistorySync";
 
 function formatCallDuration(seconds: number): string {
   if (seconds === 0) return "0s";
@@ -436,9 +437,15 @@ export const useAppStore = create<AppState>()(
 
       addCall: (call) => {
         set((state) => ({ calls: [call, ...state.calls] }));
+        // Cross-tab sync: other tabs pick this up via storage event /
+        // BroadcastChannel and update their own calls list.
+        callHistorySync.appendCall(call);
       },
 
-      clearCallHistory: () => set({ calls: [] }),
+      clearCallHistory: () => {
+        set({ calls: [] });
+        callHistorySync.replaceAll([]);
+      },
 
       addStatus: (status) => {
         set((state) => ({ statuses: [status, ...state.statuses] }));
@@ -524,6 +531,23 @@ export const useAppStore = create<AppState>()(
 
       initRealtime: (myUserId, myDisplayName) => {
         realtime.init(myUserId, myDisplayName);
+
+        // Cross-tab call history sync: when another tab writes a Call
+        // record (via callHistorySync.appendCall), the storage event /
+        // BroadcastChannel fires here. Merge any new call ids we don't
+        // already have into our local `calls` array.
+        callHistorySync.subscribe((remoteCalls) => {
+          const local = get().calls;
+          const localIds = new Set(local.map((c) => c.id));
+          const missing = remoteCalls.filter((c) => !localIds.has(c.id));
+          if (missing.length > 0) {
+            set((s) => ({ calls: [...missing, ...s.calls] }));
+          }
+          // If remote has fewer calls than local (other tab cleared
+          // history), keep local — clearing is a global action handled
+          // by clearCallHistory() which writes to the sync layer too.
+        });
+
         // Subscribe to realtime events and bridge them into local state
         realtime.subscribe((ev) => {
           const state = get();
