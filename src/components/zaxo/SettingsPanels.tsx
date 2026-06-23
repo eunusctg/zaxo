@@ -1,9 +1,9 @@
 // ==================== SETTINGS PANELS ====================
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { motion } from "framer-motion";
-import { ChevronLeft, Check, Trash2, Plus, Bell, User as UserIcon, Shield } from "lucide-react";
+import { ChevronLeft, Check, Trash2, Plus, Bell, User as UserIcon, Shield, Fingerprint, Lock, Info, AlertCircle } from "lucide-react";
 import { NeuButton } from "@/components/neumorphic/NeuButton";
 import { NeuInput } from "@/components/neumorphic/NeuInput";
 import { NeuToggle, NeuSettingRow } from "@/components/neumorphic/NeuToggle";
@@ -12,6 +12,7 @@ import { useAuthStore } from "@/store/authStore";
 import { useSettingsStore } from "@/store/settingsStore";
 import { useAppStore } from "@/store/appStore";
 import { useUIStore } from "@/store/uiStore";
+import { useSecurityStore, isBiometricAvailable } from "@/store/securityStore";
 
 export function SettingsPanel({ panelType }: { panelType: string }) {
   const { setSubPanel } = useUIStore();
@@ -33,11 +34,21 @@ export function SettingsPanel({ panelType }: { panelType: string }) {
 function SettingsHeader({ title, onClose }: { title: string; onClose: () => void }) {
   return (
     <header className="px-3 pt-4 pb-3 flex items-center gap-2">
-      <button onClick={onClose} className="neu-text p-1">
+      <button onClick={onClose} className="neu-text p-1" aria-label="Back">
         <ChevronLeft size={24} />
       </button>
       <h1 className="text-xl font-bold neu-text">{title}</h1>
     </header>
+  );
+}
+
+// Helper: intro/explainer banner at the top of settings sections
+function IntroBanner({ icon, text }: { icon?: React.ReactNode; text: string }) {
+  return (
+    <div className="neu-inset rounded-2xl px-3 py-2.5 mb-4 flex items-start gap-2.5">
+      {icon ? <div className="shrink-0 mt-0.5 neu-text-accent">{icon}</div> : <Info size={14} className="shrink-0 mt-0.5 neu-text-accent" />}
+      <div className="text-xs neu-text-muted leading-relaxed">{text}</div>
+    </div>
   );
 }
 
@@ -54,6 +65,7 @@ function SettingsContent({ panelType, onClose }: { panelType: string; onClose: (
     case "settings_linked_devices": return <LinkedDevicesSettings onClose={onClose} />;
     case "settings_blocked": return <BlockedSettings onClose={onClose} />;
     case "settings_two_step": return <TwoStepSettings onClose={onClose} />;
+    case "settings_app_lock": return <AppLockSettings onClose={onClose} />;
     default: return null;
   }
 }
@@ -76,6 +88,7 @@ function AccountSettings({ onClose }: { onClose: () => void }) {
     <>
       <SettingsHeader title="Account" onClose={onClose} />
       <div className="flex-1 overflow-y-auto neu-scroll px-4 pb-6">
+        <IntroBanner text="Your Zaxo number is permanent and unique. Update your display name, about, and manage your account security here." />
         {/* Profile card */}
         <div className="neu-raised rounded-3xl p-5 mb-4">
           <div className="flex items-center gap-4">
@@ -142,6 +155,7 @@ function PrivacySettings({ onClose }: { onClose: () => void }) {
     <>
       <SettingsHeader title="Privacy" onClose={onClose} />
       <div className="flex-1 overflow-y-auto neu-scroll px-4 pb-6">
+        <IntroBanner text="Control who can see your personal info and how you appear to others. Changes apply to new chats and status updates." />
         <Section title="Who can see my info">
           <NeuSettingRow label="Last seen & online" description={cap(settings.lastSeenVisibility)} showChevron onClick={() => updateSettings({ lastSeenVisibility: nextVisibility(settings.lastSeenVisibility) })} />
           <NeuSettingRow label="Profile photo" description={cap(settings.profilePhotoVisibility)} showChevron onClick={() => updateSettings({ profilePhotoVisibility: nextVisibility(settings.profilePhotoVisibility) })} />
@@ -222,6 +236,7 @@ function NotificationsSettings({ onClose }: { onClose: () => void }) {
     <>
       <SettingsHeader title="Notifications" onClose={onClose} />
       <div className="flex-1 overflow-y-auto neu-scroll px-4 pb-6">
+        <IntroBanner text="Choose how and when you're notified about messages, calls, and status updates. Quiet hours mute all non-critical alerts." />
         <Section title="Message notifications">
           <ToggleRow icon={<Bell size={18} />} label="Show notifications" checked={settings.messageNotifications} onChange={(v) => updateSettings({ messageNotifications: v })} />
           <NeuSettingRow label="Notification tone" description={settings.messageTone} showChevron onClick={() => updateSettings({ messageTone: settings.messageTone === "default" ? "chime" : "default" })} />
@@ -261,6 +276,7 @@ function ChatsSettings({ onClose }: { onClose: () => void }) {
     <>
       <SettingsHeader title="Chats" onClose={onClose} />
       <div className="flex-1 overflow-y-auto neu-scroll px-4 pb-6">
+        <IntroBanner text="Personalize chat appearance, manage media auto-download rules, and configure automatic chat backups to keep your conversations safe." />
         <Section title="Display">
           <NeuSettingRow label="Chat wallpaper" description={settings.chatWallpaper} showChevron />
           <NeuSettingRow label="Message text size" description={cap(settings.messageTextSize)} showChevron onClick={() => {
@@ -311,6 +327,7 @@ function StorageSettings({ onClose }: { onClose: () => void }) {
     <>
       <SettingsHeader title="Data & Storage" onClose={onClose} />
       <div className="flex-1 overflow-y-auto neu-scroll px-4 pb-6">
+        <IntroBanner text="Monitor storage used by media, documents, and voice messages. Clearing cache frees space without deleting your messages." />
         <Section title="Storage usage">
           <div className="neu-raised rounded-2xl p-4 mb-3">
             <div className="text-xs neu-text-muted mb-2">Total storage used</div>
@@ -369,6 +386,7 @@ function AppearanceSettings({ onClose }: { onClose: () => void }) {
     <>
       <SettingsHeader title="Appearance" onClose={onClose} />
       <div className="flex-1 overflow-y-auto neu-scroll px-4 pb-6">
+        <IntroBanner text="Customize the visual style of Zaxo. Neumorphism intensity controls how soft or strong the surface shadows look across the app." />
         <Section title="Theme">
           <div className="neu-raised rounded-2xl p-3 mb-3 flex gap-2">
             {(["light", "dark"] as const).map((t) => (
@@ -449,6 +467,7 @@ function AccessibilitySettings({ onClose }: { onClose: () => void }) {
     <>
       <SettingsHeader title="Accessibility" onClose={onClose} />
       <div className="flex-1 overflow-y-auto neu-scroll px-4 pb-6">
+        <IntroBanner text="Make Zaxo work better for you. Adjust font scaling, enable high contrast, or reduce motion if you prefer fewer animations." />
         <Section title="Text & contrast">
           <div className="neu-raised rounded-2xl p-4 mb-3">
             <div className="text-xs neu-text-muted mb-2">Font scaling: {Math.round(settings.fontScaling * 100)}%</div>
@@ -484,6 +503,7 @@ function HelpSettings({ onClose }: { onClose: () => void }) {
     <>
       <SettingsHeader title="Help & About" onClose={onClose} />
       <div className="flex-1 overflow-y-auto neu-scroll px-4 pb-6">
+        <IntroBanner text="Find answers, contact support, or read about how Zaxo protects your privacy. We're here to help whenever you need us." />
         <div className="neu-raised rounded-3xl p-6 mb-4 text-center">
           <div className="neu-floating w-20 h-20 rounded-3xl mx-auto flex items-center justify-center mb-3">
             <span className="text-3xl font-bold neu-text-accent">Z</span>
@@ -516,6 +536,7 @@ function LinkedDevicesSettings({ onClose }: { onClose: () => void }) {
     <>
       <SettingsHeader title="Linked Devices" onClose={onClose} />
       <div className="flex-1 overflow-y-auto neu-scroll px-4 pb-6">
+        <IntroBanner text="Use Zaxo on multiple devices without keeping your phone online. Linked devices mirror your chats securely with end-to-end encryption." />
         <Section title="Active sessions">
           <NeuSettingRow
             icon={<Bell size={18} />}
@@ -549,6 +570,7 @@ function BlockedSettings({ onClose }: { onClose: () => void }) {
     <>
       <SettingsHeader title="Blocked Contacts" onClose={onClose} />
       <div className="flex-1 overflow-y-auto neu-scroll px-4 pb-6">
+        <IntroBanner text="Blocked contacts can't send you messages or call you. They won't be notified that they're blocked, and you can unblock them anytime." />
         {blocked.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-full px-8 text-center py-20">
             <div className="neu-raised-lg rounded-3xl w-24 h-24 flex items-center justify-center mb-4">
@@ -574,61 +596,493 @@ function BlockedSettings({ onClose }: { onClose: () => void }) {
   );
 }
 
-// ==================== TWO STEP VERIFICATION ====================
+// ==================== TWO STEP VERIFICATION (real passcode) ====================
 function TwoStepSettings({ onClose }: { onClose: () => void }) {
   const { settings, updateSettings } = useSettingsStore();
+  const { setPasscode, verifyPasscode, disableAppLock } = useSecurityStore();
   const [pin, setPin] = useState("");
+  const [confirmPin, setConfirmPin] = useState("");
+  const [step, setStep] = useState<"enter" | "confirm" | "verify">("enter");
+  const [verifyPin, setVerifyPin] = useState("");
+  const [error, setError] = useState("");
   const [enabled, setEnabled] = useState(settings.twoStepVerificationEnabled);
+  const [loading, setLoading] = useState(false);
 
-  function enable() {
-    if (pin.length < 6) {
-      alert("PIN must be at least 6 digits");
+  async function handleSetPin() {
+    setError("");
+    if (pin.length !== 6) {
+      setError("PIN must be exactly 6 digits");
       return;
     }
-    updateSettings({ twoStepVerificationEnabled: true });
-    setEnabled(true);
+    if (step === "enter") {
+      setStep("confirm");
+      return;
+    }
+    if (step === "confirm") {
+      if (pin !== confirmPin) {
+        setError("PINs do not match. Try again.");
+        setConfirmPin("");
+        return;
+      }
+      setLoading(true);
+      await setPasscode(pin);
+      updateSettings({ twoStepVerificationEnabled: true });
+      setEnabled(true);
+      setLoading(false);
+      setPin("");
+      setConfirmPin("");
+      setStep("enter");
+    }
   }
 
-  function disable() {
+  async function handleVerify() {
+    setLoading(true);
+    setError("");
+    const ok = await verifyPasscode(verifyPin);
+    setLoading(false);
+    if (ok) {
+      // Verified — allow disable
+      handleDisable();
+    } else {
+      setError("Incorrect PIN. Please try again.");
+      setVerifyPin("");
+    }
+  }
+
+  function handleDisable() {
+    disableAppLock();
     updateSettings({ twoStepVerificationEnabled: false });
     setEnabled(false);
     setPin("");
+    setConfirmPin("");
+    setVerifyPin("");
+    setStep("enter");
   }
 
   return (
     <>
       <SettingsHeader title="Two-Step Verification" onClose={onClose} />
       <div className="flex-1 overflow-y-auto neu-scroll px-4 pb-6">
+        <IntroBanner icon={<Shield size={14} />} text="Two-step verification adds a 6-digit PIN as an extra layer of security. You'll be asked for this PIN when registering your Zaxo number on a new device." />
         <Section title="Status">
           <div className="neu-raised rounded-2xl p-4 mb-3">
             <div className="text-xs neu-text-muted">Two-step verification</div>
             <div className="text-base font-semibold neu-text mt-1">{enabled ? "Enabled" : "Disabled"}</div>
             <div className="text-xs neu-text-muted mt-2">
               {enabled
-                ? "Your account is protected with a PIN in addition to your password."
-                : "Add an extra layer of security. You'll need a PIN to register your phone number with Zaxo again."}
+                ? "Your account is protected with a 6-digit PIN stored securely (SHA-256 hashed)."
+                : "Add an extra layer of security. You'll need a PIN to register your Zaxo number on new devices."}
             </div>
           </div>
         </Section>
 
         {!enabled ? (
-          <Section title="Set up PIN">
-            <NeuInput
-              type="password"
-              placeholder="Enter 6-digit PIN"
-              value={pin}
-              onChange={(e) => setPin(e.target.value.replace(/\D/g, "").slice(0, 6))}
-              icon={<Shield size={16} />}
-            />
-            <NeuButton variant="accent" fullWidth rounded="xl" className="mt-3" onClick={enable}>Enable</NeuButton>
+          <Section title={step === "enter" ? "Set up PIN" : "Confirm PIN"}>
+            {error && (
+              <div className="neu-inset rounded-xl px-3 py-2 mb-3 text-xs neu-text-danger flex items-center gap-2">
+                <AlertCircle size={14} /> {error}
+              </div>
+            )}
+            <div className="neu-raised rounded-2xl p-4 mb-3">
+              <div className="text-xs neu-text-muted mb-2">
+                {step === "enter" ? "Enter a 6-digit PIN" : "Re-enter your PIN to confirm"}
+              </div>
+              <input
+                type="tel"
+                inputMode="numeric"
+                autoFocus
+                value={step === "enter" ? pin : confirmPin}
+                onChange={(e) => {
+                  const v = e.target.value.replace(/\D/g, "").slice(0, 6);
+                  if (step === "enter") setPin(v);
+                  else setConfirmPin(v);
+                }}
+                placeholder="••••••"
+                className="neu-well rounded-2xl px-4 py-3 text-2xl tracking-[0.5em] neu-text outline-none text-center w-full"
+                maxLength={6}
+              />
+              <div className="flex gap-1.5 justify-center mt-3">
+                {Array.from({ length: 6 }).map((_, i) => (
+                  <div
+                    key={i}
+                    className={`w-2.5 h-2.5 rounded-full ${i < (step === "enter" ? pin : confirmPin).length ? "neu-accent" : "neu-raised-sm"}`}
+                  />
+                ))}
+              </div>
+            </div>
+            <div className="flex gap-2">
+              {step === "confirm" && (
+                <NeuButton variant="raised" fullWidth rounded="xl" onClick={() => { setStep("enter"); setConfirmPin(""); setError(""); }}>Back</NeuButton>
+              )}
+              <NeuButton
+                variant="accent"
+                fullWidth
+                rounded="xl"
+                loading={loading}
+                disabled={(step === "enter" ? pin : confirmPin).length !== 6}
+                onClick={handleSetPin}
+              >
+                {step === "enter" ? "Next" : "Enable"}
+              </NeuButton>
+            </div>
           </Section>
         ) : (
           <>
             <Section title="PIN management">
-              <NeuSettingRow label="Change PIN" showChevron />
+              <NeuSettingRow
+                label="Change PIN"
+                description="Update your 6-digit PIN"
+                showChevron
+                onClick={() => {
+                  setEnabled(false);
+                  updateSettings({ twoStepVerificationEnabled: false });
+                  setStep("enter");
+                }}
+              />
               <NeuSettingRow label="Recovery email" description="Not set" showChevron />
             </Section>
-            <NeuButton variant="danger" fullWidth rounded="xl" icon={<Trash2 size={16} />} onClick={disable}>Disable</NeuButton>
+
+            <Section title="Disable">
+              <div className="neu-raised rounded-2xl p-4 mb-3">
+                <div className="text-xs neu-text-muted mb-2">Verify your PIN to disable</div>
+                <input
+                  type="tel"
+                  inputMode="numeric"
+                  value={verifyPin}
+                  onChange={(e) => setVerifyPin(e.target.value.replace(/\D/g, "").slice(0, 6))}
+                  placeholder="Enter PIN"
+                  className="neu-well rounded-2xl px-4 py-3 text-xl tracking-[0.5em] neu-text outline-none text-center w-full"
+                  maxLength={6}
+                />
+                {error && (
+                  <div className="mt-2 text-xs neu-text-danger flex items-center gap-2">
+                    <AlertCircle size={12} /> {error}
+                  </div>
+                )}
+              </div>
+              <NeuButton
+                variant="danger"
+                fullWidth
+                rounded="xl"
+                icon={<Trash2 size={16} />}
+                loading={loading}
+                disabled={verifyPin.length !== 6}
+                onClick={handleVerify}
+              >
+                Disable two-step verification
+              </NeuButton>
+            </Section>
+          </>
+        )}
+      </div>
+    </>
+  );
+}
+
+// ==================== APP LOCK (real biometric + passcode) ====================
+function AppLockSettings({ onClose }: { onClose: () => void }) {
+  const {
+    appLockEnabled, appLockMethod, biometricCredentialId,
+    lockTimeoutSeconds, enableAppLock, disableAppLock,
+    setPasscode, enrollBiometric, setLockTimeout, setRecoveryEmail, recoveryEmail, lockNow,
+  } = useSecurityStore();
+
+  const [bioAvailable, setBioAvailable] = useState(false);
+  const [step, setStep] = useState<"setup-method" | "setup-pin" | "setup-bio" | "confirm-pin">("setup-method");
+  const [chosenMethod, setChosenMethod] = useState<"biometric" | "passcode" | "both">("passcode");
+  const [pin, setPin] = useState("");
+  const [confirmPin, setConfirmPin] = useState("");
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [verifyPin, setVerifyPin] = useState("");
+  const [disableStep, setDisableStep] = useState<"confirm" | "verify">("confirm");
+  const [email, setEmail] = useState(recoveryEmail || "");
+
+  useEffect(() => {
+    isBiometricAvailable().then(setBioAvailable);
+  }, []);
+
+  async function handleEnable() {
+    setError("");
+    setLoading(true);
+    try {
+      if (chosenMethod === "biometric" || chosenMethod === "both") {
+        const ok = await enrollBiometric();
+        if (!ok) {
+          setError("Biometric enrollment failed. Your device may not support platform biometrics, or permission was denied.");
+          setLoading(false);
+          return;
+        }
+      }
+      if (chosenMethod === "passcode" || chosenMethod === "both") {
+        if (pin.length !== 6) {
+          setError("PIN must be exactly 6 digits");
+          setLoading(false);
+          return;
+        }
+        if (step === "setup-pin") {
+          setStep("confirm-pin");
+          setLoading(false);
+          return;
+        }
+        if (step === "confirm-pin") {
+          if (pin !== confirmPin) {
+            setError("PINs do not match.");
+            setConfirmPin("");
+            setLoading(false);
+            return;
+          }
+          await setPasscode(pin);
+        }
+      }
+      enableAppLock(chosenMethod);
+      setStep("setup-method");
+      setPin("");
+      setConfirmPin("");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  function handleDisable() {
+    disableAppLock();
+    setDisableStep("confirm");
+    setVerifyPin("");
+  }
+
+  const timeouts = [
+    { label: "Immediately", value: 0 },
+    { label: "After 1 minute", value: 60 },
+    { label: "After 5 minutes", value: 300 },
+    { label: "After 30 minutes", value: 1800 },
+  ];
+
+  return (
+    <>
+      <SettingsHeader title="App Lock" onClose={onClose} />
+      <div className="flex-1 overflow-y-auto neu-scroll px-4 pb-6">
+        <IntroBanner icon={<Fingerprint size={14} />} text="App Lock requires biometric authentication (fingerprint / Face ID) or a 6-digit passcode to open Zaxo. Your data stays encrypted and locked when the app is in the background." />
+
+        {!bioAvailable && (
+          <div className="neu-inset rounded-2xl px-3 py-2.5 mb-4 flex items-start gap-2.5">
+            <AlertCircle size={14} className="shrink-0 mt-0.5 neu-text-warning" />
+            <div className="text-xs neu-text-muted leading-relaxed">
+              Biometric authentication isn't available on this device/browser. You can still use a 6-digit passcode.
+            </div>
+          </div>
+        )}
+
+        {/* Status */}
+        <Section title="Status">
+          <div className="neu-raised rounded-2xl p-4 mb-3">
+            <div className="flex items-center justify-between">
+              <div>
+                <div className="text-xs neu-text-muted">App lock</div>
+                <div className="text-base font-semibold neu-text mt-1">{appLockEnabled ? "Enabled" : "Disabled"}</div>
+              </div>
+              <NeuToggle checked={appLockEnabled} onChange={(v) => v ? setStep("setup-method") : setDisableStep("verify")} />
+            </div>
+            {appLockEnabled && (
+              <div className="text-xs neu-text-muted mt-2">
+                Method: <span className="neu-text-accent capitalize">{appLockMethod}</span>
+                {biometricCredentialId && " · Biometric enrolled ✓"}
+              </div>
+            )}
+          </div>
+        </Section>
+
+        {/* Enable flow */}
+        {appLockEnabled === false && step === "setup-method" && (
+          <Section title="Choose method">
+            <button
+              onClick={() => { setChosenMethod("biometric"); setStep("setup-bio"); }}
+              disabled={!bioAvailable}
+              className={`w-full neu-raised-sm rounded-2xl px-4 py-3 mb-2 flex items-center gap-3 text-left ${!bioAvailable ? "opacity-50" : ""}`}
+            >
+              <div className="neu-inset rounded-xl w-9 h-9 flex items-center justify-center neu-text-accent">
+                <Fingerprint size={18} />
+              </div>
+              <div className="flex-1">
+                <div className="text-sm font-medium neu-text">Biometric only</div>
+                <div className="text-xs neu-text-muted">Use fingerprint or face recognition</div>
+              </div>
+            </button>
+            <button
+              onClick={() => { setChosenMethod("passcode"); setStep("setup-pin"); }}
+              className="w-full neu-raised-sm rounded-2xl px-4 py-3 mb-2 flex items-center gap-3 text-left"
+            >
+              <div className="neu-inset rounded-xl w-9 h-9 flex items-center justify-center neu-text-accent">
+                <Lock size={18} />
+              </div>
+              <div className="flex-1">
+                <div className="text-sm font-medium neu-text">Passcode only</div>
+                <div className="text-xs neu-text-muted">6-digit numeric PIN (SHA-256 hashed)</div>
+              </div>
+            </button>
+            <button
+              onClick={() => { setChosenMethod("both"); setStep("setup-pin"); }}
+              disabled={!bioAvailable}
+              className={`w-full neu-raised-sm rounded-2xl px-4 py-3 mb-2 flex items-center gap-3 text-left ${!bioAvailable ? "opacity-50" : ""}`}
+            >
+              <div className="neu-inset rounded-xl w-9 h-9 flex items-center justify-center neu-text-accent">
+                <Shield size={18} />
+              </div>
+              <div className="flex-1">
+                <div className="text-sm font-medium neu-text">Both (recommended)</div>
+                <div className="text-xs neu-text-muted">Biometric primary, passcode as backup</div>
+              </div>
+            </button>
+          </Section>
+        )}
+
+        {/* Setup PIN flow */}
+        {(step === "setup-pin" || step === "confirm-pin") && (
+          <Section title={step === "setup-pin" ? "Set up 6-digit passcode" : "Confirm passcode"}>
+            {error && (
+              <div className="neu-inset rounded-xl px-3 py-2 mb-3 text-xs neu-text-danger flex items-center gap-2">
+                <AlertCircle size={14} /> {error}
+              </div>
+            )}
+            <div className="neu-raised rounded-2xl p-4 mb-3">
+              <div className="text-xs neu-text-muted mb-2">
+                {step === "setup-pin" ? "Enter a 6-digit PIN" : "Re-enter to confirm"}
+              </div>
+              <input
+                type="tel"
+                inputMode="numeric"
+                autoFocus
+                value={step === "setup-pin" ? pin : confirmPin}
+                onChange={(e) => {
+                  const v = e.target.value.replace(/\D/g, "").slice(0, 6);
+                  if (step === "setup-pin") setPin(v);
+                  else setConfirmPin(v);
+                }}
+                placeholder="••••••"
+                className="neu-well rounded-2xl px-4 py-3 text-2xl tracking-[0.5em] neu-text outline-none text-center w-full"
+                maxLength={6}
+              />
+              <div className="flex gap-1.5 justify-center mt-3">
+                {Array.from({ length: 6 }).map((_, i) => (
+                  <div
+                    key={i}
+                    className={`w-2.5 h-2.5 rounded-full ${i < (step === "setup-pin" ? pin : confirmPin).length ? "neu-accent" : "neu-raised-sm"}`}
+                  />
+                ))}
+              </div>
+            </div>
+            <div className="flex gap-2">
+              <NeuButton variant="raised" fullWidth rounded="xl" onClick={() => { setStep("setup-method"); setPin(""); setConfirmPin(""); setError(""); }}>Back</NeuButton>
+              <NeuButton
+                variant="accent"
+                fullWidth
+                rounded="xl"
+                loading={loading}
+                disabled={(step === "setup-pin" ? pin : confirmPin).length !== 6}
+                onClick={handleEnable}
+              >
+                {step === "setup-pin" ? "Next" : "Enable app lock"}
+              </NeuButton>
+            </div>
+          </Section>
+        )}
+
+        {/* Setup biometric */}
+        {step === "setup-bio" && (
+          <Section title="Enroll biometric">
+            <div className="neu-raised rounded-2xl p-4 mb-3 text-center">
+              <Fingerprint size={48} className="mx-auto neu-text-accent mb-2" />
+              <div className="text-sm neu-text">Touch your sensor or look at the camera when prompted by your browser.</div>
+            </div>
+            <div className="flex gap-2">
+              <NeuButton variant="raised" fullWidth rounded="xl" onClick={() => setStep("setup-method")}>Back</NeuButton>
+              <NeuButton variant="accent" fullWidth rounded="xl" loading={loading} onClick={handleEnable}>Enroll & enable</NeuButton>
+            </div>
+          </Section>
+        )}
+
+        {/* When enabled: show options */}
+        {appLockEnabled && (
+          <>
+            <Section title="Auto-lock">
+              <div className="neu-raised rounded-2xl p-2 mb-3">
+                {timeouts.map((t) => (
+                  <button
+                    key={t.value}
+                    onClick={() => setLockTimeout(t.value)}
+                    className={`w-full px-3 py-2.5 rounded-xl text-sm flex items-center justify-between transition-all ${lockTimeoutSeconds === t.value ? "neu-inset neu-text-accent font-medium" : "neu-text"}`}
+                  >
+                    {t.label}
+                    {lockTimeoutSeconds === t.value && <Check size={16} />}
+                  </button>
+                ))}
+              </div>
+              <div className="text-xs neu-text-muted px-1">
+                Zaxo will lock automatically when you switch away and return after the selected time.
+              </div>
+            </Section>
+
+            <Section title="Recovery">
+              <div className="neu-raised rounded-2xl p-4 mb-3">
+                <div className="text-xs neu-text-muted mb-1">Recovery email (optional)</div>
+                <input
+                  type="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="you@example.com"
+                  className="neu-well rounded-xl px-3 py-2 text-sm neu-text outline-none w-full mt-1"
+                />
+                <div className="text-[10px] neu-text-muted mt-2">
+                  Used to reset your passcode if you forget it. We never share this email.
+                </div>
+              </div>
+              <NeuButton variant="raised" fullWidth rounded="xl" onClick={() => { setRecoveryEmail(email); }}>Save recovery email</NeuButton>
+            </Section>
+
+            <Section title="Test">
+              <NeuButton variant="raised" fullWidth rounded="xl" icon={<Lock size={16} />} onClick={() => lockNow()}>
+                Lock now
+              </NeuButton>
+              <div className="text-xs neu-text-muted px-1 mt-2">
+                Locks Zaxo immediately to verify your settings.
+              </div>
+            </Section>
+
+            <Section title="Disable">
+              {disableStep === "confirm" ? (
+                <NeuButton variant="danger" fullWidth rounded="xl" icon={<Trash2 size={16} />} onClick={() => setDisableStep("verify")}>
+                  Disable app lock
+                </NeuButton>
+              ) : (
+                <div className="neu-raised rounded-2xl p-4 mb-3">
+                  <div className="text-xs neu-text-muted mb-2">Verify passcode to disable</div>
+                  <input
+                    type="tel"
+                    inputMode="numeric"
+                    value={verifyPin}
+                    onChange={(e) => setVerifyPin(e.target.value.replace(/\D/g, "").slice(0, 6))}
+                    placeholder="Enter PIN"
+                    className="neu-well rounded-2xl px-4 py-3 text-xl tracking-[0.5em] neu-text outline-none text-center w-full"
+                    maxLength={6}
+                  />
+                  <div className="flex gap-2 mt-3">
+                    <NeuButton variant="raised" fullWidth rounded="xl" onClick={() => { setDisableStep("confirm"); setVerifyPin(""); }}>Cancel</NeuButton>
+                    <NeuButton
+                      variant="danger"
+                      fullWidth
+                      rounded="xl"
+                      disabled={verifyPin.length !== 6}
+                      onClick={async () => {
+                        const ok = await useSecurityStore.getState().verifyPasscode(verifyPin);
+                        if (ok) handleDisable();
+                        else alert("Incorrect PIN");
+                      }}
+                    >
+                      Confirm disable
+                    </NeuButton>
+                  </div>
+                </div>
+              )}
+            </Section>
           </>
         )}
       </div>

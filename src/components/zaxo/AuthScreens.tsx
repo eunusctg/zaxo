@@ -22,7 +22,7 @@ export function AuthScreen() {
         transition={{ duration: 0.5, ease: [0.16, 1, 0.3, 1] }}
         className="flex flex-col items-center mt-8"
       >
-        <ZaxoLogo size={80} animated />
+        <ZaxoLogo size={80} animated useImage />
         <h1 className="text-3xl font-bold neu-text mt-6">Welcome to Zaxo</h1>
         <p className="text-sm neu-text-muted mt-2 text-center max-w-xs">
           Your permanent 9-digit Zaxo number connects you with anyone, anywhere.

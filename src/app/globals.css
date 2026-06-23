@@ -309,6 +309,7 @@
 .neu-text-accent { color: var(--neu-accent); }
 .neu-text-success { color: var(--neu-success); }
 .neu-text-danger { color: var(--neu-danger); }
+.neu-text-warning { color: var(--neu-warning); }
 
 /* Background helpers */
 .neu-bg { background-color: var(--neu-bg); }

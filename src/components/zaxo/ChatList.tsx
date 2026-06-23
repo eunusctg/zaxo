@@ -1,7 +1,7 @@
 // ==================== CHAT LIST ====================
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Search, MessageSquarePlus, Archive, Pin, BellOff, Users, MoreVertical, Check, CheckCheck } from "lucide-react";
 import { NeuButton, NeuInput } from "@/components/neumorphic";
@@ -16,6 +16,26 @@ export function ChatList() {
   const { chats, contacts } = useAppStore();
   const { showSearch, searchQuery, setShowSearch, setSubPanel, setSubPanel: sp } = useUIStore();
   const [menuOpenFor, setMenuOpenFor] = useState<string | null>(null);
+
+  // Simulate occasional incoming messages from random contacts to feel "realtime"
+  useEffect(() => {
+    const interval = setInterval(() => {
+      // 25% chance every 30s, only if user has chats
+      if (Math.random() < 0.25 && useAppStore.getState().chats.length > 0) {
+        const nonArchived = useAppStore.getState().chats.filter((c) => !c.isArchived && c.type === "individual");
+        if (nonArchived.length === 0) return;
+        const chat = nonArchived[Math.floor(Math.random() * nonArchived.length)];
+        const otherId = chat.participantIds[0];
+        const msgs = [
+          "Hey 👋", "What's up?", "You free?", "Did you see that?", "lol",
+          "👌", "👍", "Catch up later?", "Coffee?", "How's it going?",
+        ];
+        const text = msgs[Math.floor(Math.random() * msgs.length)];
+        useAppStore.getState().receiveMessage(chat.id, otherId, text);
+      }
+    }, 30000);
+    return () => clearInterval(interval);
+  }, []);
 
   const visibleChats = useMemo(() => {
     return chats
@@ -42,10 +62,10 @@ export function ChatList() {
   const archivedCount = chats.filter((c) => c.isArchived).length;
 
   return (
-    <div className="flex flex-col h-full" style={{ background: "var(--neu-bg)" }}>
+    <div className="flex flex-col h-full w-full" style={{ background: "var(--neu-bg)" }}>
       {/* Header */}
-      <header className="px-4 pt-4 pb-2 flex items-center justify-between gap-2">
-        <h1 className="text-2xl font-bold neu-text">Chats</h1>
+      <header className="px-3 sm:px-4 pt-4 pb-2 flex items-center justify-between gap-2">
+        <h1 className="text-xl sm:text-2xl font-bold neu-text">Chats</h1>
         <div className="flex items-center gap-2">
           <button
             onClick={() => setShowSearch(!showSearch)}
@@ -128,7 +148,7 @@ export function ChatList() {
 }
 
 function ChatListItem({ chat, menuOpen, onMenuToggle }: { chat: Chat; menuOpen: boolean; onMenuToggle: () => void }) {
-  const { contacts, setSubPanel: spApp } = useAppStore();
+  const { contacts } = useAppStore();
   const { setSubPanel } = useUIStore();
   const { user } = useAuthStore();
   const other = chat.type === "individual" ? getContactById(chat.participantIds[0], contacts) : null;

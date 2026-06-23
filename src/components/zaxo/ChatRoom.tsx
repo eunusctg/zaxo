@@ -7,7 +7,7 @@ import {
   ChevronLeft, Phone, Video, MoreVertical, Smile, Paperclip,
   Mic, Send, Camera, FileText, MapPin, User, X, Reply, Star,
   Trash2, Copy, Forward, Pencil, Check, CheckCheck, Play, Pause,
-  Download, File,
+  Download, File, Pin, Info, Archive, MoreHorizontal,
 } from "lucide-react";
 import { NeuAvatar } from "@/components/neumorphic/NeuAvatar";
 import { NeuButton } from "@/components/neumorphic/NeuButton";
@@ -15,12 +15,12 @@ import { useAppStore } from "@/store/appStore";
 import { useUIStore } from "@/store/uiStore";
 import { useAuthStore } from "@/store/authStore";
 import { formatTime, formatDateSeparator, getContactById } from "@/lib/zaxo/mockData";
-import type { Message, Chat } from "@/types";
+import type { Message, Chat, Call } from "@/types";
 
 const QUICK_EMOJIS = ["👍", "❤️", "😂", "😮", "😢", "😡", "🙏", "🔥"];
 
 export function ChatRoom({ chatId }: { chatId: string }) {
-  const { chats, contacts, messages, sendMessage, markChatRead, setTyping, toggleReaction } = useAppStore();
+  const { chats, contacts, messages, sendMessage, markChatRead, setTyping, setMyTyping, toggleReaction, insertCallMessage } = useAppStore();
   const { setSubPanel } = useUIStore();
   const { user } = useAuthStore();
   const [draft, setDraft] = useState("");
@@ -31,17 +31,21 @@ export function ChatRoom({ chatId }: { chatId: string }) {
   const [replyTo, setReplyTo] = useState<Message | null>(null);
   const [activeMessage, setActiveMessage] = useState<Message | null>(null);
   const [showReactionPicker, setShowReactionPicker] = useState<string | null>(null);
+  const [showForwardSheet, setShowForwardSheet] = useState<Message | null>(null);
+  const [showInfoSheet, setShowInfoSheet] = useState<Message | null>(null);
+  const [showChatMenu, setShowChatMenu] = useState(false);
 
   const chat = chats.find((c) => c.id === chatId);
   const chatMessages = messages[chatId] || [];
   const scrollRef = useRef<HTMLDivElement>(null);
+  const typingDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Mark as read on open
   useEffect(() => {
     markChatRead(chatId);
-  }, [chatId, markChatRead]);
+  }, [chatId, markChatRead, chatMessages.length]);
 
-  // Simulate other user typing then responding
+  // Simulate other user typing then responding (realtime-ish)
   const otherTyping = chat?.typingUserIds.length || 0;
 
   // Auto-scroll to bottom
@@ -79,9 +83,11 @@ export function ChatRoom({ chatId }: { chatId: string }) {
 
   function handleSend() {
     if (!draft.trim()) return;
-    sendMessage(chatId, draft.trim());
+    const text = draft.trim();
+    sendMessage(chatId, text, "text", replyTo ? { replyTo: replyTo.id } : undefined);
     setDraft("");
     setReplyTo(null);
+    setMyTyping(chatId, false);
     // Simulate a reply for individual chats
     if (chat?.type === "individual") {
       const otherId = chat.participantIds[0];
@@ -89,34 +95,41 @@ export function ChatRoom({ chatId }: { chatId: string }) {
         setTyping(chatId, [otherId]);
         setTimeout(() => {
           setTyping(chatId, []);
-          const replies = ["Got it! 👍", "Haha nice", "Sounds good", "Talk soon!", "👀", "Will do!", "Perfect!"];
+          const replies = [
+            "Got it! 👍", "Haha nice", "Sounds good", "Talk soon!", "👀",
+            "Will do!", "Perfect!", "Sure thing", "On it", "Let me check",
+            "🤔", "😂", "🔥", "💯", "Okay cool",
+          ];
           const reply = replies[Math.floor(Math.random() * replies.length)];
-          // Use store directly to send from other user
-          useAppStore.setState((state) => {
-            const newMsg: Message = {
-              id: `m_${Date.now()}_other`,
-              chatId,
-              senderId: otherId,
-              type: "text",
-              text: reply,
-              timestamp: Date.now(),
-              status: "delivered",
-              reactions: {},
-              disappearing: "off",
-            };
-            return {
-              messages: {
-                ...state.messages,
-                [chatId]: [...(state.messages[chatId] || []), newMsg],
-              },
-              chats: state.chats.map((c) =>
-                c.id === chatId ? { ...c, lastMessage: newMsg, updatedAt: newMsg.timestamp } : c,
-              ),
-            };
-          });
-        }, 1500);
-      }, 800);
+          useAppStore.getState().receiveMessage(chatId, otherId, reply);
+        }, 800 + Math.random() * 800);
+      }, 400);
     }
+  }
+
+  function handleDraftChange(value: string) {
+    setDraft(value);
+    // Trigger "typing" indicator locally
+    setMyTyping(chatId, value.length > 0);
+    if (typingDebounceRef.current) clearTimeout(typingDebounceRef.current);
+    typingDebounceRef.current = setTimeout(() => {
+      setMyTyping(chatId, false);
+    }, 1500);
+  }
+
+  function handleEndCall(callType: "voice" | "video", duration: number, missed: boolean) {
+    if (!chat) return;
+    const direction = missed ? "missed" : "outgoing";
+    insertCallMessage(chatId, callType, direction, duration);
+    const newCall: Call = {
+      id: `call_${Date.now()}`,
+      otherUserId: chat.type === "individual" ? chat.participantIds[0] : "",
+      type: callType,
+      direction,
+      timestamp: Date.now(),
+      duration,
+    };
+    useAppStore.getState().addCall(newCall);
   }
 
   function handleVoiceSend() {
@@ -161,15 +174,48 @@ export function ChatRoom({ chatId }: { chatId: string }) {
             </div>
           </div>
         </button>
-        <button onClick={() => setSubPanel({ type: "call_screen", otherUserId: chat.type === "individual" ? chat.participantIds[0] : "", callType: "voice" })} className="neu-pressable rounded-full w-10 h-10 flex items-center justify-center neu-text">
-          <Phone size={18} />
-        </button>
-        <button onClick={() => setSubPanel({ type: "call_screen", otherUserId: chat.type === "individual" ? chat.participantIds[0] : "", callType: "video" })} className="neu-pressable rounded-full w-10 h-10 flex items-center justify-center neu-text">
-          <Video size={18} />
-        </button>
-        <button className="neu-pressable rounded-full w-10 h-10 flex items-center justify-center neu-text">
-          <MoreVertical size={18} />
-        </button>
+        {chat.type === "individual" && (
+          <>
+            <button onClick={() => setSubPanel({ type: "call_screen", otherUserId: chat.participantIds[0], callType: "voice" })} className="neu-pressable rounded-full w-10 h-10 flex items-center justify-center neu-text" aria-label="Voice call">
+              <Phone size={18} />
+            </button>
+            <button onClick={() => setSubPanel({ type: "call_screen", otherUserId: chat.participantIds[0], callType: "video" })} className="neu-pressable rounded-full w-10 h-10 flex items-center justify-center neu-text" aria-label="Video call">
+              <Video size={18} />
+            </button>
+          </>
+        )}
+        <div className="relative">
+          <button onClick={() => setShowChatMenu(!showChatMenu)} className="neu-pressable rounded-full w-10 h-10 flex items-center justify-center neu-text" aria-label="More">
+            <MoreVertical size={18} />
+          </button>
+          <AnimatePresence>
+            {showChatMenu && (
+              <motion.div
+                initial={{ opacity: 0, y: -4 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -4 }}
+                className="absolute right-0 top-12 z-30 neu-raised rounded-2xl py-2 min-w-[180px]"
+                onClick={() => setShowChatMenu(false)}
+              >
+                <button onClick={() => useAppStore.getState().togglePinChat(chatId)} className="w-full px-4 py-2 flex items-center gap-3 text-sm neu-text hover:opacity-70">
+                  <Pin size={14} /> {chat.isPinned ? "Unpin chat" : "Pin chat"}
+                </button>
+                <button onClick={() => useAppStore.getState().toggleMuteChat(chatId)} className="w-full px-4 py-2 flex items-center gap-3 text-sm neu-text hover:opacity-70">
+                  <MoreHorizontal size={14} /> {chat.isMuted ? "Unmute" : "Mute"}
+                </button>
+                <button onClick={() => useAppStore.getState().toggleArchiveChat(chatId)} className="w-full px-4 py-2 flex items-center gap-3 text-sm neu-text hover:opacity-70">
+                  <Archive size={14} /> {chat.isArchived ? "Unarchive" : "Archive"}
+                </button>
+                <button onClick={() => { if (confirm("Clear all messages in this chat?")) useAppStore.getState().clearChatMessages(chatId); }} className="w-full px-4 py-2 flex items-center gap-3 text-sm neu-text-danger hover:opacity-70">
+                  <Trash2 size={14} /> Clear messages
+                </button>
+                <button onClick={() => { if (confirm("Delete this chat?")) { useAppStore.getState().deleteChat(chatId); setSubPanel({ type: "none" }); } }} className="w-full px-4 py-2 flex items-center gap-3 text-sm neu-text-danger hover:opacity-70">
+                  <Trash2 size={14} /> Delete chat
+                </button>
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </div>
       </header>
 
       {/* Messages */}
@@ -307,7 +353,7 @@ export function ChatRoom({ chatId }: { chatId: string }) {
               </button>
               <textarea
                 value={draft}
-                onChange={(e) => setDraft(e.target.value)}
+                onChange={(e) => handleDraftChange(e.target.value)}
                 onKeyDown={(e) => {
                   if (e.key === "Enter" && !e.shiftKey) {
                     e.preventDefault();
@@ -370,7 +416,26 @@ export function ChatRoom({ chatId }: { chatId: string }) {
             chat={chat}
             onClose={() => setActiveMessage(null)}
             onReply={() => { setReplyTo(activeMessage); setActiveMessage(null); }}
+            onForward={() => { setShowForwardSheet(activeMessage); setActiveMessage(null); }}
+            onInfo={() => { setShowInfoSheet(activeMessage); setActiveMessage(null); }}
           />
+        )}
+      </AnimatePresence>
+
+      {/* Forward sheet */}
+      <AnimatePresence>
+        {showForwardSheet && (
+          <ForwardSheet
+            msg={showForwardSheet}
+            onClose={() => setShowForwardSheet(null)}
+          />
+        )}
+      </AnimatePresence>
+
+      {/* Info sheet */}
+      <AnimatePresence>
+        {showInfoSheet && (
+          <MessageInfoSheet msg={showInfoSheet} chat={chat} onClose={() => setShowInfoSheet(null)} />
         )}
       </AnimatePresence>
     </div>
@@ -390,9 +455,17 @@ function MessageBubble({
   reactionPickerOpen: boolean;
   onReactionPick: (e: string) => void;
 }) {
-  const { contacts } = useAppStore();
+  const { contacts, messages } = useAppStore();
   const sender = msg.senderId === "me" ? null : getContactById(msg.senderId, contacts);
   const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Resolve reply target
+  const repliedTo = msg.replyTo
+    ? (messages[chat.id] || []).find((m) => m.id === msg.replyTo)
+    : undefined;
+  const repliedSender = repliedTo
+    ? (repliedTo.senderId === "me" ? "You" : getContactById(repliedTo.senderId, contacts)?.displayName || "Unknown")
+    : null;
 
   function handlePressStart() {
     longPressTimer.current = setTimeout(() => onLongPress(), 500);
@@ -402,9 +475,15 @@ function MessageBubble({
   }
 
   if (msg.type === "system") {
+    // Render call/system messages specially
+    const isCallMsg = msg.text?.includes("📞") || msg.text?.includes("🎥");
+    const isMissed = msg.text?.includes("Missed");
     return (
       <div className="flex justify-center my-2">
-        <div className="neu-raised-sm rounded-full px-3 py-1 text-[11px] neu-text-muted">
+        <div
+          className={`rounded-full px-3 py-1.5 text-[11px] flex items-center gap-1.5 ${isCallMsg ? (isMissed ? "neu-text-danger" : "neu-text-accent") : "neu-text-muted"}`}
+          style={{ background: "var(--neu-surface)", boxShadow: "inset 2px 2px 4px var(--neu-shadow-dark), inset -2px -2px 4px var(--neu-shadow-light)" }}
+        >
           {msg.text}
         </div>
       </div>
@@ -448,9 +527,33 @@ function MessageBubble({
           {msg.deletedForEveryone ? (
             <span className="italic opacity-70 text-xs">🚫 This message was deleted</span>
           ) : (
-            <MessageContent msg={msg} isMine={isMine} />
+            <>
+              {repliedTo && repliedSender && (
+                <div
+                  className="mb-1.5 px-2 py-1 rounded-lg border-l-2 text-[11px] truncate"
+                  style={{
+                    borderColor: isMine ? "rgba(255,255,255,0.6)" : "var(--neu-accent)",
+                    background: isMine ? "rgba(255,255,255,0.12)" : "rgba(108, 92, 231, 0.08)",
+                  }}
+                >
+                  <div className={isMine ? "text-white/80 font-medium" : "neu-text-accent font-medium"}>
+                    {repliedSender}
+                  </div>
+                  <div className={isMine ? "text-white/70 truncate" : "neu-text-muted truncate"}>
+                    {repliedTo.text || `[${repliedTo.type}]`}
+                  </div>
+                </div>
+              )}
+              {msg.forwarded && (
+                <div className="text-[10px] opacity-70 mb-0.5 flex items-center gap-1">
+                  <Forward size={10} /> Forwarded
+                </div>
+              )}
+              <MessageContent msg={msg} isMine={isMine} />
+            </>
           )}
           <div className={`flex items-center gap-1 mt-1 ${isMine ? "justify-end" : "justify-start"}`}>
+            {msg.pinned && <Pin size={10} className={isMine ? "text-white/70" : "neu-text-muted"} />}
             <span className={`text-[10px] ${isMine ? "text-white/70" : "neu-text-muted"}`}>
               {formatTime(msg.timestamp)}
               {msg.edited && <span className="ml-1">· edited</span>}
@@ -656,10 +759,11 @@ function AttachOption({ icon, label, color, onClick }: { icon: React.ReactNode; 
   );
 }
 
-function MessageActionSheet({ msg, chat, onClose, onReply }: { msg: Message; chat: Chat; onClose: () => void; onReply: () => void }) {
+function MessageActionSheet({ msg, chat, onClose, onReply, onForward, onInfo }: { msg: Message; chat: Chat; onClose: () => void; onReply: () => void; onForward: () => void; onInfo: () => void }) {
   const { toggleStarMessage, deleteMessage, editMessage } = useAppStore();
   const [editing, setEditing] = useState(false);
   const [editText, setEditText] = useState(msg.text || "");
+  const [deleteMode, setDeleteMode] = useState<null | "me" | "everyone">(null);
 
   const isMine = msg.senderId === "me";
 
@@ -702,10 +806,12 @@ function MessageActionSheet({ msg, chat, onClose, onReply }: { msg: Message; cha
         <div className="w-12 h-1 rounded-full mx-auto neu-text-muted opacity-30 mb-3" />
 
         {/* Message preview */}
-        {!editing && (
+        {!editing && !deleteMode && (
           <div className="neu-inset rounded-2xl px-4 py-3 mb-4 max-h-32 overflow-y-auto neu-scroll">
             <div className="text-xs neu-text-muted mb-1">
               {formatDateSeparator(msg.timestamp)} · {formatTime(msg.timestamp)}
+              {msg.forwarded && <span className="ml-2 neu-text-accent">· Forwarded</span>}
+              {msg.edited && <span className="ml-2">· Edited</span>}
             </div>
             <div className="text-sm neu-text whitespace-pre-wrap break-words">
               {msg.deletedForEveryone ? "🚫 This message was deleted" : msg.text || `[${msg.type}]`}
@@ -720,6 +826,7 @@ function MessageActionSheet({ msg, chat, onClose, onReply }: { msg: Message; cha
               onChange={(e) => setEditText(e.target.value)}
               className="neu-well rounded-2xl px-4 py-3 text-sm neu-text outline-none w-full resize-none"
               rows={3}
+              autoFocus
             />
             <div className="flex gap-2 mt-2">
               <NeuButton variant="raised" fullWidth rounded="xl" onClick={() => setEditing(false)}>Cancel</NeuButton>
@@ -728,18 +835,44 @@ function MessageActionSheet({ msg, chat, onClose, onReply }: { msg: Message; cha
           </div>
         )}
 
-        {!editing && (
-          <div className="grid grid-cols-4 gap-3">
+        {deleteMode && (
+          <div className="mb-4">
+            <div className="text-sm neu-text mb-3 font-medium">Delete message?</div>
+            <div className="space-y-2">
+              <button
+                onClick={() => handleDelete(false)}
+                className="w-full neu-raised-sm rounded-2xl px-4 py-3 text-left text-sm neu-text hover:opacity-80"
+              >
+                <div className="font-medium">Delete for me</div>
+                <div className="text-xs neu-text-muted">Remove this message from your device only</div>
+              </button>
+              {isMine && (
+                <button
+                  onClick={() => handleDelete(true)}
+                  className="w-full neu-raised-sm rounded-2xl px-4 py-3 text-left text-sm hover:opacity-80"
+                  style={{ color: "var(--neu-danger)" }}
+                >
+                  <div className="font-medium">Delete for everyone</div>
+                  <div className="text-xs opacity-70">Remove this message for everyone in this chat</div>
+                </button>
+              )}
+              <NeuButton variant="raised" fullWidth rounded="xl" onClick={() => setDeleteMode(null)}>Cancel</NeuButton>
+            </div>
+          </div>
+        )}
+
+        {!editing && !deleteMode && (
+          <div className="grid grid-cols-4 gap-2">
             <ActionItem icon={<Reply size={18} />} label="Reply" onClick={onReply} />
             <ActionItem icon={<Copy size={18} />} label="Copy" onClick={handleCopy} />
+            <ActionItem icon={<Forward size={18} />} label="Forward" onClick={onForward} />
+            <ActionItem icon={<Info size={18} />} label="Info" onClick={onInfo} />
             <ActionItem icon={<Star size={18} />} label={msg.starred ? "Unstar" : "Star"} onClick={() => { toggleStarMessage(chat.id, msg.id); onClose(); }} />
-            <ActionItem icon={<Forward size={18} />} label="Forward" onClick={onClose} />
+            <ActionItem icon={<Pin size={18} />} label={msg.pinned ? "Unpin" : "Pin"} onClick={() => { useAppStore.setState((s) => ({ messages: { ...s.messages, [chat.id]: (s.messages[chat.id] || []).map((m) => m.id === msg.id ? { ...m, pinned: !m.pinned } : m) } })); onClose(); }} />
             {isMine && msg.type === "text" && (
               <ActionItem icon={<Pencil size={18} />} label="Edit" onClick={() => setEditing(true)} />
             )}
-            {isMine && (
-              <ActionItem icon={<Trash2 size={18} />} label="Delete" danger onClick={() => handleDelete(true)} />
-            )}
+            <ActionItem icon={<Trash2 size={18} />} label="Delete" danger onClick={() => setDeleteMode("me")} />
           </div>
         )}
       </motion.div>
@@ -751,13 +884,169 @@ function ActionItem({ icon, label, onClick, danger }: { icon: React.ReactNode; l
   return (
     <button
       onClick={onClick}
-      className="flex flex-col items-center gap-1.5 p-2"
+      className="flex flex-col items-center gap-1.5 p-2 active:scale-95 transition-transform"
     >
       <div className={`w-12 h-12 neu-raised-sm rounded-2xl flex items-center justify-center ${danger ? "neu-text-danger" : "neu-text-accent"}`}>
         {icon}
       </div>
       <span className={`text-[11px] ${danger ? "neu-text-danger" : "neu-text-muted"}`}>{label}</span>
     </button>
+  );
+}
+
+function ForwardSheet({ msg, onClose }: { msg: Message; onClose: () => void }) {
+  const { chats, contacts, forwardMessage } = useAppStore();
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+
+  function toggle(id: string) {
+    const next = new Set(selected);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    setSelected(next);
+  }
+
+  function handleForward() {
+    if (selected.size === 0) return;
+    // We need the source chat — we can read it from msg.chatId
+    forwardMessage(msg.chatId, msg.id, Array.from(selected));
+    onClose();
+  }
+
+  return (
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      className="fixed inset-0 z-50 flex items-end justify-center"
+      onClick={onClose}
+    >
+      <div className="absolute inset-0 bg-black/40" />
+      <motion.div
+        initial={{ y: 200 }}
+        animate={{ y: 0 }}
+        exit={{ y: 200 }}
+        transition={{ type: "spring", damping: 30 }}
+        onClick={(e) => e.stopPropagation()}
+        className="relative z-10 w-full max-w-md neu-raised rounded-t-3xl p-4 pb-6 max-h-[80vh] flex flex-col"
+      >
+        <div className="w-12 h-1 rounded-full mx-auto neu-text-muted opacity-30 mb-3" />
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="text-base font-semibold neu-text">Forward to…</h3>
+          {selected.size > 0 && (
+            <span className="neu-accent rounded-full px-2.5 py-0.5 text-xs text-white">{selected.size} selected</span>
+          )}
+        </div>
+
+        <div className="neu-inset rounded-2xl px-3 py-2 mb-3 text-xs neu-text-muted">
+          <span className="neu-text-accent font-medium">Forwarding:</span>{" "}
+          {msg.text ? (msg.text.length > 60 ? msg.text.slice(0, 60) + "…" : msg.text) : `[${msg.type}]`}
+        </div>
+
+        <div className="flex-1 overflow-y-auto neu-scroll">
+          {chats.filter((c) => !c.isArchived).map((c) => {
+            const other = c.type === "individual" ? getContactById(c.participantIds[0], contacts) : null;
+            const name = c.type === "group" ? c.name || "Group" : other?.displayName || "Unknown";
+            const isSel = selected.has(c.id);
+            return (
+              <button
+                key={c.id}
+                onClick={() => toggle(c.id)}
+                className="w-full flex items-center gap-3 px-2 py-2.5 rounded-2xl hover:bg-[color:var(--neu-shadow-light)]/5"
+              >
+                <NeuAvatar
+                  initial={c.type === "group" ? c.avatarInitial || "G" : other?.avatarInitial || "?"}
+                  gradient={c.type === "group" ? c.avatarColor || "" : other?.avatarColor || ""}
+                  size={40}
+                />
+                <div className="flex-1 text-left min-w-0">
+                  <div className="font-semibold text-sm neu-text truncate">{name}</div>
+                </div>
+                <div
+                  className={`w-6 h-6 rounded-full flex items-center justify-center transition-all ${isSel ? "neu-accent" : "neu-raised-sm"}`}
+                >
+                  {isSel && <Check size={14} className="text-white" />}
+                </div>
+              </button>
+            );
+          })}
+        </div>
+
+        <NeuButton
+          variant="accent"
+          fullWidth
+          rounded="xl"
+          className="mt-3"
+          disabled={selected.size === 0}
+          onClick={handleForward}
+        >
+          {selected.size === 0 ? "Select chats" : `Forward to ${selected.size}`}
+        </NeuButton>
+      </motion.div>
+    </motion.div>
+  );
+}
+
+function MessageInfoSheet({ msg, chat, onClose }: { msg: Message; chat: Chat; onClose: () => void }) {
+  const { contacts } = useAppStore();
+  const sender = msg.senderId === "me" ? null : getContactById(msg.senderId, contacts);
+  const senderName = msg.senderId === "me" ? "You" : sender?.displayName || "Unknown";
+
+  return (
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      className="fixed inset-0 z-50 flex items-end justify-center"
+      onClick={onClose}
+    >
+      <div className="absolute inset-0 bg-black/40" />
+      <motion.div
+        initial={{ y: 200 }}
+        animate={{ y: 0 }}
+        exit={{ y: 200 }}
+        transition={{ type: "spring", damping: 30 }}
+        onClick={(e) => e.stopPropagation()}
+        className="relative z-10 w-full max-w-md neu-raised rounded-t-3xl p-4 pb-6"
+      >
+        <div className="w-12 h-1 rounded-full mx-auto neu-text-muted opacity-30 mb-3" />
+        <h3 className="text-base font-semibold neu-text mb-3">Message info</h3>
+
+        <div className="neu-inset rounded-2xl px-4 py-3 mb-3 max-h-32 overflow-y-auto neu-scroll">
+          <div className="text-sm neu-text whitespace-pre-wrap break-words">
+            {msg.deletedForEveryone ? "🚫 This message was deleted" : msg.text || `[${msg.type}]`}
+          </div>
+        </div>
+
+        <div className="space-y-2 text-sm">
+          <InfoRow label="Sender" value={senderName} />
+          <InfoRow label="Type" value={msg.type} />
+          <InfoRow label="Sent" value={`${formatDateSeparator(msg.timestamp)} · ${formatTime(msg.timestamp)}`} />
+          {msg.edited && <InfoRow label="Edited" value="Yes" />}
+          {msg.forwarded && <InfoRow label="Forwarded" value="Yes" />}
+          {msg.starred && <InfoRow label="Starred" value="Yes" />}
+          {msg.pinned && <InfoRow label="Pinned" value="Yes" />}
+          {msg.senderId === "me" && (
+            <>
+              <InfoRow label="Delivered" value={msg.status === "sending" ? "Pending" : formatTime(msg.timestamp + 30000)} />
+              <InfoRow label="Read" value={msg.status === "read" ? formatTime(msg.timestamp + 60000) : "Not yet"} />
+            </>
+          )}
+          <InfoRow label="Disappearing" value={msg.disappearing === "off" ? "Off" : msg.disappearing.toUpperCase()} />
+          <InfoRow label="Message ID" value={msg.id} mono />
+        </div>
+
+        <NeuButton variant="raised" fullWidth rounded="xl" className="mt-4" onClick={onClose}>Close</NeuButton>
+      </motion.div>
+    </motion.div>
+  );
+}
+
+function InfoRow({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
+  return (
+    <div className="flex items-center justify-between gap-3">
+      <span className="text-xs neu-text-muted">{label}</span>
+      <span className={`text-xs neu-text text-right truncate ${mono ? "font-mono" : ""}`} style={{ maxWidth: "60%" }}>{value}</span>
+    </div>
   );
 }
 

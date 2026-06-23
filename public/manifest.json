@@ -1,0 +1,17 @@
+{
+  "name": "Zaxo — Social Messenger",
+  "short_name": "Zaxo",
+  "description": "Connect with anyone via your permanent Zaxo number. Neumorphic soft-UI social messenger.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#E0E5EC",
+  "theme_color": "#6C5CE7",
+  "icons": [
+    {
+      "src": "/zaxo-app-icon.png",
+      "sizes": "1024x1024",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}

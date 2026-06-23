@@ -65,6 +65,8 @@ export interface Message {
   starred?: boolean;
   deletedForEveryone?: boolean;
   edited?: boolean;
+  forwarded?: boolean;
+  pinned?: boolean;
   reactions: { [userId: string]: string };
   disappearing: DisappearingTimer;
 }

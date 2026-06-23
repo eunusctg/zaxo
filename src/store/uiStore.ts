@@ -34,6 +34,7 @@ export type SubPanel =
   | { type: "settings_linked_devices" }
   | { type: "settings_blocked" }
   | { type: "settings_two_step" }
+  | { type: "settings_app_lock" }
   | { type: "new_call" }
   | { type: "share_zaxo" }
   | { type: "qr_scanner" };

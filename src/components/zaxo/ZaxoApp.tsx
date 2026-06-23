@@ -6,6 +6,7 @@ import { AnimatePresence, motion } from "framer-motion";
 import { useUIStore } from "@/store/uiStore";
 import { useAuthStore } from "@/store/authStore";
 import { useSettingsStore } from "@/store/settingsStore";
+import { useSecurityStore } from "@/store/securityStore";
 
 import { SplashScreen } from "./SplashScreen";
 import { AuthScreen, EmailAuthScreen } from "./AuthScreens";
@@ -19,11 +20,13 @@ import { StatusScreen, StatusViewer, StatusCreator } from "./StatusScreen";
 import { YouScreen } from "./YouScreen";
 import { SettingsPanel } from "./SettingsPanels";
 import { ShareZaxoScreen, QRScannerScreen, NewChatScreen, NewGroupScreen } from "./NewChatScreens";
+import { AppLockScreen } from "./AppLockScreen";
 
 export function ZaxoApp() {
   const { screen, activeTab, subPanel, setScreen } = useUIStore();
   const { user, isAuthenticated } = useAuthStore();
   const { theme } = useSettingsStore();
+  const { appLockEnabled, isLocked, lockTimeoutSeconds, lastUnlockedAt, lockNow } = useSecurityStore();
 
   // Apply theme to <html>
   useEffect(() => {
@@ -41,6 +44,37 @@ export function ZaxoApp() {
       setScreen("auth");
     }
   }, [isAuthenticated, screen, setScreen]);
+
+  // Auto-lock when tab becomes hidden if lockTimeout is 0 (immediate) — or after timeout
+  useEffect(() => {
+    if (!appLockEnabled) return;
+    function onVisibilityChange() {
+      if (document.visibilityState === "hidden") {
+        if (lockTimeoutSeconds === 0) {
+          lockNow();
+        }
+      } else if (document.visibilityState === "visible") {
+        // Check if timeout elapsed
+        if (lockTimeoutSeconds > 0) {
+          const elapsed = (Date.now() - lastUnlockedAt) / 1000;
+          if (elapsed >= lockTimeoutSeconds) {
+            lockNow();
+          }
+        }
+      }
+    }
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    return () => document.removeEventListener("visibilitychange", onVisibilityChange);
+  }, [appLockEnabled, lockTimeoutSeconds, lastUnlockedAt, lockNow]);
+
+  // Show app lock screen if locked
+  if (appLockEnabled && isLocked && isAuthenticated && screen === "main") {
+    return (
+      <div className="mobile-frame relative overflow-hidden flex flex-col" style={{ height: "100vh", background: "var(--neu-bg)" }}>
+        <AppLockScreen />
+      </div>
+    );
+  }
 
   return (
     <div className="mobile-frame relative overflow-hidden flex flex-col" style={{ height: "100vh", background: "var(--neu-bg)" }}>
@@ -136,6 +170,7 @@ function SubPanelContent({ panel }: { panel: ReturnType<typeof useUIStore.getSta
     case "settings_linked_devices":
     case "settings_blocked":
     case "settings_two_step":
+    case "settings_app_lock":
       return <SettingsPanel panelType={panel.type} />;
     default:
       return null;

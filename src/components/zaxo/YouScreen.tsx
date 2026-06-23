@@ -5,7 +5,7 @@ import { motion } from "framer-motion";
 import {
   QrCode, Share2, ChevronRight, Settings, User, Lock, Bell,
   MessageSquare, Database, Palette, Accessibility, HelpCircle,
-  LogOut, Users, Shield, Key, Smartphone, Star, Moon, Sun,
+  LogOut, Users, Shield, Key, Smartphone, Star, Moon, Sun, Fingerprint,
 } from "lucide-react";
 import { NeuAvatar } from "@/components/neumorphic/NeuAvatar";
 import { NeuButton } from "@/components/neumorphic/NeuButton";
@@ -13,18 +13,20 @@ import { NeuSettingRow } from "@/components/neumorphic/NeuToggle";
 import { useAuthStore } from "@/store/authStore";
 import { useUIStore } from "@/store/uiStore";
 import { useSettingsStore } from "@/store/settingsStore";
+import { useSecurityStore } from "@/store/securityStore";
 
 export function YouScreen() {
   const { user, signOut } = useAuthStore();
   const { setSubPanel } = useUIStore();
   const { theme, toggleTheme } = useSettingsStore();
+  const { appLockEnabled, appLockMethod } = useSecurityStore();
 
   if (!user) return null;
 
   return (
-    <div className="flex flex-col h-full" style={{ background: "var(--neu-bg)" }}>
-      <header className="px-4 pt-4 pb-2 flex items-center justify-between">
-        <h1 className="text-2xl font-bold neu-text">You</h1>
+    <div className="flex flex-col h-full w-full" style={{ background: "var(--neu-bg)" }}>
+      <header className="px-3 sm:px-4 pt-4 pb-2 flex items-center justify-between">
+        <h1 className="text-xl sm:text-2xl font-bold neu-text">You</h1>
         <button
           onClick={() => toggleTheme()}
           className="neu-pressable rounded-full w-10 h-10 flex items-center justify-center neu-text"
@@ -34,23 +36,23 @@ export function YouScreen() {
         </button>
       </header>
 
-      <div className="flex-1 overflow-y-auto neu-scroll px-3 pb-4">
+      <div className="flex-1 overflow-y-auto neu-scroll px-3 sm:px-4 pb-4">
         {/* Profile header */}
         <motion.div
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
-          className="neu-raised rounded-3xl p-5 mb-3 mt-2"
+          className="neu-raised rounded-3xl p-4 sm:p-5 mb-3 mt-2"
         >
-          <div className="flex items-center gap-4">
-            <NeuAvatar initial={user.avatarInitial} gradient={user.avatarColor} size={72} online />
+          <div className="flex items-center gap-3 sm:gap-4">
+            <NeuAvatar initial={user.avatarInitial} gradient={user.avatarColor} size={64} online />
             <div className="flex-1 min-w-0">
-              <div className="font-bold text-lg neu-text truncate">{user.displayName}</div>
-              <div className="text-sm neu-text-muted truncate">{user.about}</div>
+              <div className="font-bold text-base sm:text-lg neu-text truncate">{user.displayName}</div>
+              <div className="text-xs sm:text-sm neu-text-muted truncate">{user.about}</div>
               <div className="text-xs neu-text-accent font-mono mt-1">{user.zaxoNumber}</div>
             </div>
             <button
               onClick={() => setSubPanel({ type: "settings_account" })}
-              className="neu-pressable rounded-xl w-9 h-9 flex items-center justify-center neu-text-muted"
+              className="neu-pressable rounded-xl w-9 h-9 flex items-center justify-center neu-text-muted shrink-0"
               aria-label="Edit profile"
             >
               <User size={16} />
@@ -103,6 +105,13 @@ export function YouScreen() {
             description={user ? "Not enabled" : "Disabled"}
             showChevron
             onClick={() => setSubPanel({ type: "settings_two_step" })}
+          />
+          <NeuSettingRow
+            icon={<Fingerprint size={18} />}
+            label="App lock"
+            description={appLockEnabled ? `Enabled · ${appLockMethod}` : "Biometric + passcode"}
+            showChevron
+            onClick={() => setSubPanel({ type: "settings_app_lock" })}
           />
           <NeuSettingRow
             icon={<Smartphone size={18} />}

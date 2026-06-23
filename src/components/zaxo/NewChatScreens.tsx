@@ -9,6 +9,7 @@ import { NeuInput } from "@/components/neumorphic/NeuInput";
 import { NeuAvatar } from "@/components/neumorphic/NeuAvatar";
 import { useAuthStore } from "@/store/authStore";
 import { useUIStore } from "@/store/uiStore";
+import { useAppStore } from "@/store/appStore";
 
 // Deterministic mock QR pattern from zaxo number
 function generateQRMatrix(data: string, size: number = 21): boolean[][] {
