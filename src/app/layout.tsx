@@ -15,6 +15,7 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: "Zaxo — Social Messenger",
+  applicationName: "Zaxo",
   description:
     "Zaxo is a modern social messenger with a unique permanent Zaxo number, neumorphic UI, real-time chats, calls, and stories.",
   keywords: [
@@ -28,8 +29,14 @@ export const metadata: Metadata = {
   ],
   authors: [{ name: "Zaxo" }],
   icons: {
-    icon: "/zaxo-app-icon.png",
-    apple: "/zaxo-app-icon.png",
+    icon: [
+      { url: "/favicon.ico", sizes: "any" },
+      { url: "/favicon-32.png", sizes: "32x32", type: "image/png" },
+      { url: "/favicon-16.png", sizes: "16x16", type: "image/png" },
+    ],
+    apple: [
+      { url: "/apple-touch-icon.png", sizes: "180x180", type: "image/png" },
+    ],
     shortcut: "/zaxo-app-icon.png",
   },
   manifest: "/manifest.json",

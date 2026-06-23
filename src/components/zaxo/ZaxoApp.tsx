@@ -7,6 +7,10 @@ import { useUIStore } from "@/store/uiStore";
 import { useAuthStore } from "@/store/authStore";
 import { useSettingsStore } from "@/store/settingsStore";
 import { useSecurityStore } from "@/store/securityStore";
+import { useAppStore } from "@/store/appStore";
+import { useCallStateStore } from "@/store/callStateStore";
+import { realtime } from "@/lib/zaxo/realtime";
+import { notifications } from "@/lib/zaxo/notifications";
 
 import { SplashScreen } from "./SplashScreen";
 import { AuthScreen, EmailAuthScreen } from "./AuthScreens";
@@ -21,12 +25,15 @@ import { YouScreen } from "./YouScreen";
 import { SettingsPanel } from "./SettingsPanels";
 import { ShareZaxoScreen, QRScannerScreen, NewChatScreen, NewGroupScreen } from "./NewChatScreens";
 import { AppLockScreen } from "./AppLockScreen";
+import { IncomingCallOverlay } from "./IncomingCallOverlay";
 
 export function ZaxoApp() {
-  const { screen, activeTab, subPanel, setScreen } = useUIStore();
+  const { screen, activeTab, subPanel, setScreen, setSubPanel } = useUIStore();
   const { user, isAuthenticated } = useAuthStore();
-  const { theme } = useSettingsStore();
+  const { theme, settings } = useSettingsStore();
   const { appLockEnabled, isLocked, lockTimeoutSeconds, lastUnlockedAt, lockNow } = useSecurityStore();
+  const { initRealtime } = useAppStore();
+  const { activeCall, incomingCall } = useCallStateStore();
 
   // Apply theme to <html>
   useEffect(() => {
@@ -35,6 +42,43 @@ export function ZaxoApp() {
       else document.documentElement.classList.remove("dark");
     }
   }, [theme]);
+
+  // Initialize notifications API
+  useEffect(() => {
+    notifications.init();
+  }, []);
+
+  // Configure notifications with current settings + click handlers
+  useEffect(() => {
+    notifications.configure({
+      settings,
+      onChatClick: (chatId) => {
+        setSubPanel({ type: "chat_room", chatId });
+      },
+      onStatusClick: (userId) => {
+        useUIStore.getState().setActiveTab("status");
+        setSubPanel({ type: "status_viewer", userId });
+      },
+      onCallAnswer: (callId) => {
+        // IncomingCallOverlay handles answer via state; this just focuses
+        window.focus();
+      },
+      onCallDecline: (callId) => {
+        realtime.declineCall(callId);
+        useCallStateStore.getState().setIncomingCall(null);
+      },
+    });
+  }, [settings, setSubPanel]);
+
+  // Request notification permission when user becomes authenticated
+  useEffect(() => {
+    if (isAuthenticated && user) {
+      // Request permission (silently fails if denied)
+      notifications.requestPermission();
+      // Initialize realtime service
+      initRealtime(user.id, user.displayName);
+    }
+  }, [isAuthenticated, user, initRealtime]);
 
   // Auto-route based on auth state on first mount
   useEffect(() => {
@@ -130,8 +174,11 @@ export function ZaxoApp() {
               </AnimatePresence>
             </div>
 
+            {/* Incoming call overlay (covers everything) */}
+            {incomingCall && <IncomingCallOverlay />}
+
             {/* Bottom navigation */}
-            {subPanel.type === "none" && <BottomNav />}
+            {subPanel.type === "none" && !incomingCall && <BottomNav />}
           </motion.div>
         )}
       </AnimatePresence>

@@ -1,9 +1,11 @@
 // ==================== SHARE ZAXO SCREEN (QR CODE) ====================
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import { motion } from "framer-motion";
-import { X, Copy, Check, Share2, ScanLine } from "lucide-react";
+import { X, Copy, Check, Share2, ScanLine, Camera, CameraOff, AlertCircle } from "lucide-react";
+import QRCode from "qrcode";
+import jsQR from "jsqr";
 import { NeuButton } from "@/components/neumorphic/NeuButton";
 import { NeuInput } from "@/components/neumorphic/NeuInput";
 import { NeuAvatar } from "@/components/neumorphic/NeuAvatar";
@@ -11,7 +13,7 @@ import { useAuthStore } from "@/store/authStore";
 import { useUIStore } from "@/store/uiStore";
 import { useAppStore } from "@/store/appStore";
 
-// Deterministic mock QR pattern from zaxo number
+// Deterministic mock QR pattern from zaxo number (fallback only — replaced by real QR)
 function generateQRMatrix(data: string, size: number = 21): boolean[][] {
   // Simple deterministic pseudo-QR pattern (visual only - not a real QR code)
   const matrix: boolean[][] = [];
@@ -48,9 +50,23 @@ export function ShareZaxoScreen() {
   const { user } = useAuthStore();
   const { setSubPanel } = useUIStore();
   const [copied, setCopied] = useState(false);
+  const [qrDataUrl, setQrDataUrl] = useState<string>("");
+
+  // Generate real QR code from zaxo:// URI
+  useEffect(() => {
+    if (!user) return;
+    const payload = `zaxo://contact?number=${encodeURIComponent(user.zaxoNumber)}&name=${encodeURIComponent(user.displayName)}`;
+    QRCode.toDataURL(payload, {
+      errorCorrectionLevel: "H",
+      margin: 2,
+      width: 480,
+      color: { dark: "#1a1a2e", light: "#ffffff" },
+    })
+      .then(setQrDataUrl)
+      .catch((e) => console.warn("[Zaxo] QR gen failed", e));
+  }, [user]);
 
   if (!user) return null;
-  const matrix = generateQRMatrix(user.zaxoNumber, 21);
 
   function handleCopy() {
     navigator.clipboard?.writeText(user!.zaxoNumber);
@@ -95,24 +111,20 @@ export function ShareZaxoScreen() {
             className="bg-white rounded-2xl p-3 mx-auto"
             style={{ width: 240, height: 240 }}
           >
-            <div
-              className="w-full h-full grid"
-              style={{
-                gridTemplateColumns: `repeat(${matrix.length}, 1fr)`,
-                gap: 0,
-              }}
-            >
-              {matrix.map((row, i) =>
-                row.map((cell, j) => (
-                  <div
-                    key={`${i}-${j}`}
-                    style={{
-                      background: cell ? "#000" : "transparent",
-                    }}
-                  />
-                )),
-              )}
-            </div>
+            {qrDataUrl ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={qrDataUrl}
+                alt="Zaxo QR Code"
+                width={216}
+                height={216}
+                style={{ width: "100%", height: "100%", objectFit: "contain" }}
+              />
+            ) : (
+              <div className="w-full h-full flex items-center justify-center text-xs text-gray-400">
+                Generating QR…
+              </div>
+            )}
           </div>
 
           <div className="text-center mt-4">
@@ -164,51 +176,309 @@ export function ShareZaxoScreen() {
   );
 }
 
-// ==================== QR SCANNER ====================
+// ==================== QR SCANNER (REAL CAMERA) ====================
 export function QRScannerScreen() {
   const { setSubPanel } = useUIStore();
+  const { addContactByZaxoNumber, startChatWithContact, findContactByZaxoNumber } = useAppStore();
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+  const rafRef = useRef<number | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [status, setStatus] = useState<"starting" | "scanning" | "found" | "denied" | "unsupported">("starting");
+  const [foundNumber, setFoundNumber] = useState<string | null>(null);
+  const [foundName, setFoundName] = useState<string | null>(null);
+  const [manualNumber, setManualNumber] = useState("");
+
+  // Parse a scanned QR payload. Supports:
+  //   - zaxo://contact?number=XXX&name=YYY
+  //   - bare Zaxo number (XXX-XXX-XXX or XXXXXXXXX)
+  function parseZaxoPayload(raw: string): { number: string; name?: string } | null {
+    if (!raw) return null;
+    const trimmed = raw.trim();
+    // zaxo:// URI
+    if (trimmed.startsWith("zaxo://")) {
+      try {
+        const url = new URL(trimmed);
+        const number = url.searchParams.get("number");
+        const name = url.searchParams.get("name");
+        if (number) return { number, name: name || undefined };
+      } catch {
+        return null;
+      }
+    }
+    // Bare number: XXX-XXX-XXX or 9 digits
+    const cleaned = trimmed.replace(/[\s-]/g, "");
+    if (/^\d{9}$/.test(cleaned) || /^\d{3}-\d{3}-\d{3}$/.test(trimmed)) {
+      return { number: trimmed };
+    }
+    return null;
+  }
+
+  function handleScan(raw: string) {
+    const parsed = parseZaxoPayload(raw);
+    if (!parsed) {
+      setError("QR code is not a Zaxo contact. Make sure it's a Zaxo QR code.");
+      return;
+    }
+    setFoundNumber(parsed.number);
+    setFoundName(parsed.name || null);
+    setStatus("found");
+    // Stop the camera
+    stopCamera();
+  }
+
+  function stopCamera() {
+    if (rafRef.current) {
+      cancelAnimationFrame(rafRef.current);
+      rafRef.current = null;
+    }
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach((t) => t.stop());
+      streamRef.current = null;
+    }
+  }
+
+  // Camera scanning loop using jsQR
+  useEffect(() => {
+    let mounted = true;
+
+    async function startCamera() {
+      if (typeof navigator === "undefined" || !navigator.mediaDevices?.getUserMedia) {
+        setStatus("unsupported");
+        setError("Camera API not supported in this browser.");
+        return;
+      }
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: "environment" },
+          audio: false,
+        });
+        if (!mounted) {
+          stream.getTracks().forEach((t) => t.stop());
+          return;
+        }
+        streamRef.current = stream;
+        if (videoRef.current) {
+          videoRef.current.srcObject = stream;
+          videoRef.current.setAttribute("playsinline", "true");
+          await videoRef.current.play();
+        }
+        setStatus("scanning");
+        // Begin scan loop
+        const tick = () => {
+          if (!mounted) return;
+          if (videoRef.current && videoRef.current.readyState === videoRef.current.HAVE_ENOUGH_DATA) {
+            const video = videoRef.current;
+            const canvas = canvasRef.current;
+            if (canvas) {
+              const w = video.videoWidth || 480;
+              const h = video.videoHeight || 640;
+              canvas.width = w;
+              canvas.height = h;
+              const ctx = canvas.getContext("2d", { willReadFrequently: true });
+              if (ctx) {
+                ctx.drawImage(video, 0, 0, w, h);
+                const imageData = ctx.getImageData(0, 0, w, h);
+                const code = jsQR(imageData.data, w, h, { inversionAttempts: "dontInvert" });
+                if (code && code.data) {
+                  handleScan(code.data);
+                  return;
+                }
+              }
+            }
+          }
+          rafRef.current = requestAnimationFrame(tick);
+        };
+        rafRef.current = requestAnimationFrame(tick);
+      } catch (err: unknown) {
+        const e = err as DOMException;
+        if (e.name === "NotAllowedError" || e.name === "PermissionDeniedError") {
+          setStatus("denied");
+          setError("Camera permission denied. Please allow camera access in your browser settings, or enter the Zaxo number manually below.");
+        } else if (e.name === "NotFoundError" || e.name === "DevicesNotFoundError") {
+          setStatus("unsupported");
+          setError("No camera found on this device. Enter the Zaxo number manually below.");
+        } else {
+          setStatus("unsupported");
+          setError(`Camera error: ${e.message || "unknown"}`);
+        }
+      }
+    }
+
+    startCamera();
+    return () => {
+      mounted = false;
+      stopCamera();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  function handleAddContact() {
+    if (!foundNumber) return;
+    const existing = findContactByZaxoNumber(foundNumber);
+    if (!existing) {
+      addContactByZaxoNumber(foundNumber, foundName || undefined);
+    }
+    const contact = findContactByZaxoNumber(foundNumber);
+    if (contact) {
+      const chatId = startChatWithContact(contact.id);
+      setSubPanel({ type: "chat_room", chatId });
+    } else {
+      setSubPanel({ type: "none" });
+    }
+  }
+
+  function handleManualAdd() {
+    const parsed = parseZaxoPayload(manualNumber);
+    if (!parsed) {
+      setError("Enter a valid Zaxo number (XXX-XXX-XXX or 9 digits).");
+      return;
+    }
+    setError(null);
+    setFoundNumber(parsed.number);
+    setFoundName(parsed.name || null);
+    setStatus("found");
+  }
+
   return (
-    <div className="flex flex-col h-full px-6 py-4 relative" style={{ background: "#000" }}>
-      <header className="flex items-center justify-between mb-4">
+    <div className="flex flex-col h-full relative" style={{ background: "#000" }}>
+      {/* Hidden canvas for frame capture */}
+      <canvas ref={canvasRef} style={{ display: "none" }} />
+
+      {/* Header */}
+      <header className="flex items-center justify-between px-4 py-4 z-10 relative">
         <h1 className="text-xl font-bold text-white">Scan QR Code</h1>
-        <button onClick={() => setSubPanel({ type: "none" })} className="text-white p-2">
+        <button onClick={() => { stopCamera(); setSubPanel({ type: "none" }); }} className="text-white p-2">
           <X size={20} />
         </button>
       </header>
 
-      <div className="flex-1 flex flex-col items-center justify-center">
+      {/* Video viewport */}
+      <div className="flex-1 flex flex-col items-center justify-center relative overflow-hidden">
         <div
           className="relative rounded-3xl overflow-hidden"
-          style={{ width: 280, height: 280, background: "rgba(255,255,255,0.05)" }}
+          style={{ width: "100%", maxWidth: 360, height: "100%", maxHeight: 480 }}
         >
-          {/* Corner brackets */}
-          <div className="absolute top-0 left-0 w-12 h-12 border-t-4 border-l-4 border-[var(--neu-accent)] rounded-tl-3xl" />
-          <div className="absolute top-0 right-0 w-12 h-12 border-t-4 border-r-4 border-[var(--neu-accent)] rounded-tr-3xl" />
-          <div className="absolute bottom-0 left-0 w-12 h-12 border-b-4 border-l-4 border-[var(--neu-accent)] rounded-bl-3xl" />
-          <div className="absolute bottom-0 right-0 w-12 h-12 border-b-4 border-r-4 border-[var(--neu-accent)] rounded-br-3xl" />
-
-          {/* Scan line animation */}
-          <motion.div
-            className="absolute left-4 right-4 h-1"
-            style={{ background: "linear-gradient(90deg, transparent, var(--neu-accent), transparent)" }}
-            animate={{ top: ["10%", "85%", "10%"] }}
-            transition={{ duration: 2.5, repeat: Infinity, ease: "easeInOut" }}
+          <video
+            ref={videoRef}
+            className="w-full h-full object-cover"
+            playsInline
+            muted
           />
+          {/* Corner brackets */}
+          <div className="absolute inset-0 pointer-events-none">
+            <div className="absolute top-1/4 left-1/4 w-12 h-12 border-t-4 border-l-4 border-[var(--neu-accent)] rounded-tl-3xl" />
+            <div className="absolute top-1/4 right-1/4 w-12 h-12 border-t-4 border-r-4 border-[var(--neu-accent)] rounded-tr-3xl" />
+            <div className="absolute bottom-1/4 left-1/4 w-12 h-12 border-b-4 border-l-4 border-[var(--neu-accent)] rounded-bl-3xl" />
+            <div className="absolute bottom-1/4 right-1/4 w-12 h-12 border-b-4 border-r-4 border-[var(--neu-accent)] rounded-br-3xl" />
+            {/* Scan line */}
+            {status === "scanning" && (
+              <motion.div
+                className="absolute left-1/4 right-1/4 h-1"
+                style={{ background: "linear-gradient(90deg, transparent, var(--neu-accent), transparent)" }}
+                animate={{ top: ["25%", "70%", "25%"] }}
+                transition={{ duration: 2.5, repeat: Infinity, ease: "easeInOut" }}
+              />
+            )}
+          </div>
+
+          {/* Status overlay */}
+          {status === "starting" && (
+            <div className="absolute inset-0 flex items-center justify-center bg-black/60">
+              <div className="text-white text-sm flex items-center gap-2">
+                <Camera size={16} /> Starting camera…
+              </div>
+            </div>
+          )}
+          {status === "denied" && (
+            <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/80 p-6 text-center">
+              <CameraOff size={48} className="text-white/60 mb-3" />
+              <p className="text-white/80 text-sm">{error}</p>
+            </div>
+          )}
+          {status === "unsupported" && (
+            <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/80 p-6 text-center">
+              <AlertCircle size={48} className="text-white/60 mb-3" />
+              <p className="text-white/80 text-sm">{error}</p>
+            </div>
+          )}
+          {status === "found" && (
+            <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/85 p-6 text-center">
+              <motion.div
+                initial={{ scale: 0.5, opacity: 0 }}
+                animate={{ scale: 1, opacity: 1 }}
+                className="w-16 h-16 rounded-full bg-green-500 flex items-center justify-center mb-3"
+              >
+                <Check size={32} className="text-white" />
+              </motion.div>
+              <p className="text-white text-base font-medium">{foundName || "Zaxo contact found"}</p>
+              <p className="text-white/70 text-sm font-mono mt-1">{foundNumber}</p>
+            </div>
+          )}
         </div>
 
-        <p className="text-white/70 text-sm mt-8 text-center max-w-xs">
-          Point your camera at a Zaxo QR code to add the contact instantly.
+        <p className="text-white/70 text-sm mt-6 text-center max-w-xs px-6">
+          {status === "scanning"
+            ? "Point your camera at a Zaxo QR code to add the contact instantly."
+            : status === "found"
+              ? "Contact detected. Add them to start chatting."
+              : ""}
         </p>
+      </div>
 
-        <NeuButton
-          variant="raised"
-          size="md"
-          rounded="xl"
-          className="mt-6"
-          onClick={() => setSubPanel({ type: "none" })}
-        >
-          Cancel
-        </NeuButton>
+      {/* Action bar */}
+      <div className="p-4 z-10 relative" style={{ background: "rgba(0,0,0,0.85)" }}>
+        {status === "found" ? (
+          <div className="space-y-2">
+            <NeuButton
+              variant="accent"
+              size="lg"
+              fullWidth
+              rounded="xl"
+              onClick={handleAddContact}
+            >
+              Add contact & chat
+            </NeuButton>
+            <NeuButton
+              variant="raised"
+              size="md"
+              fullWidth
+              rounded="xl"
+              onClick={() => { setFoundNumber(null); setFoundName(null); setStatus("starting"); setError(null); }}
+            >
+              Scan another
+            </NeuButton>
+          </div>
+        ) : (
+          <div className="space-y-2">
+            <div className="flex gap-2">
+              <input
+                type="text"
+                placeholder="Enter Zaxo number manually (XXX-XXX-XXX)"
+                value={manualNumber}
+                onChange={(e) => setManualNumber(e.target.value)}
+                className="flex-1 px-4 py-3 rounded-xl bg-white/10 text-white text-sm placeholder-white/40 border border-white/20"
+              />
+              <button
+                onClick={handleManualAdd}
+                className="px-4 py-3 rounded-xl bg-[var(--neu-accent)] text-white text-sm font-medium"
+              >
+                Add
+              </button>
+            </div>
+            {error && <p className="text-red-400 text-xs">{error}</p>}
+            <NeuButton
+              variant="raised"
+              size="md"
+              fullWidth
+              rounded="xl"
+              onClick={() => { stopCamera(); setSubPanel({ type: "none" }); }}
+            >
+              Cancel
+            </NeuButton>
+          </div>
+        )}
       </div>
     </div>
   );

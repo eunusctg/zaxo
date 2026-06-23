@@ -20,7 +20,7 @@ import type { Message, Chat, Call } from "@/types";
 const QUICK_EMOJIS = ["👍", "❤️", "😂", "😮", "😢", "😡", "🙏", "🔥"];
 
 export function ChatRoom({ chatId }: { chatId: string }) {
-  const { chats, contacts, messages, sendMessage, markChatRead, setTyping, setMyTyping, toggleReaction, insertCallMessage } = useAppStore();
+  const { chats, contacts, messages, sendMessage, markChatRead, setTyping, setMyTyping, toggleReaction, insertCallMessage, startGroupCall } = useAppStore();
   const { setSubPanel } = useUIStore();
   const { user } = useAuthStore();
   const [draft, setDraft] = useState("");
@@ -75,9 +75,18 @@ export function ChatRoom({ chatId }: { chatId: string }) {
 
   const other = chat.type === "individual" ? getContactById(chat.participantIds[0], contacts) : null;
   const name = chat.type === "group" ? chat.name || "Group" : other?.displayName || "Unknown";
+  // Build typing subtitle
+  const typingNames = (chat.typingUserIds || [])
+    .map((id) => id === "me" ? null : getContactById(id, contacts))
+    .filter(Boolean)
+    .map((c) => c!.displayName.split(" ")[0]);
   const subtitle = chat.type === "group"
-    ? `${chat.participantIds.length + 1} members`
-    : other?.online ? "online" : other ? `last seen ${relativeShort(other.lastSeen)}` : "";
+    ? typingNames.length > 0
+      ? `${typingNames.join(", ")} ${typingNames.length === 1 ? "is" : "are"} typing…`
+      : `${chat.participantIds.length + 1} members`
+    : typingNames.length > 0
+      ? "typing…"
+      : other?.online ? "online" : other ? `last seen ${relativeShort(other.lastSeen)}` : "";
   const avatarInitial = chat.type === "group" ? chat.avatarInitial || "G" : other?.avatarInitial || "?";
   const avatarGradient = chat.type === "group" ? chat.avatarColor || "" : other?.avatarColor || "";
 
@@ -88,7 +97,8 @@ export function ChatRoom({ chatId }: { chatId: string }) {
     setDraft("");
     setReplyTo(null);
     setMyTyping(chatId, false);
-    // Simulate a reply for individual chats
+    // For demo: simulate a reply ONLY if this is an individual chat with a mock contact
+    // (Real cross-tab messaging is handled by the realtime service in appStore.)
     if (chat?.type === "individual") {
       const otherId = chat.participantIds[0];
       setTimeout(() => {
@@ -102,8 +112,8 @@ export function ChatRoom({ chatId }: { chatId: string }) {
           ];
           const reply = replies[Math.floor(Math.random() * replies.length)];
           useAppStore.getState().receiveMessage(chatId, otherId, reply);
-        }, 800 + Math.random() * 800);
-      }, 400);
+        }, 1500 + Math.random() * 1500);
+      }, 600);
     }
   }
 
@@ -168,9 +178,7 @@ export function ChatRoom({ chatId }: { chatId: string }) {
           <div className="text-left min-w-0">
             <div className="font-semibold text-sm neu-text truncate">{name}</div>
             <div className="text-xs neu-text-muted truncate">
-              {otherTyping > 0 ? (
-                <span className="neu-text-accent">typing…</span>
-              ) : subtitle}
+              {subtitle}
             </div>
           </div>
         </button>
@@ -180,6 +188,35 @@ export function ChatRoom({ chatId }: { chatId: string }) {
               <Phone size={18} />
             </button>
             <button onClick={() => setSubPanel({ type: "call_screen", otherUserId: chat.participantIds[0], callType: "video" })} className="neu-pressable rounded-full w-10 h-10 flex items-center justify-center neu-text" aria-label="Video call">
+              <Video size={18} />
+            </button>
+          </>
+        )}
+        {chat.type === "group" && (
+          <>
+            <button
+              onClick={() => {
+                startGroupCall(chatId, "voice");
+                // For demo: just open the call screen with the first participant as the "remote"
+                if (chat.participantIds.length > 0) {
+                  setSubPanel({ type: "call_screen", otherUserId: chat.participantIds[0], callType: "voice" });
+                }
+              }}
+              className="neu-pressable rounded-full w-10 h-10 flex items-center justify-center neu-text"
+              aria-label="Group voice call"
+            >
+              <Phone size={18} />
+            </button>
+            <button
+              onClick={() => {
+                startGroupCall(chatId, "video");
+                if (chat.participantIds.length > 0) {
+                  setSubPanel({ type: "call_screen", otherUserId: chat.participantIds[0], callType: "video" });
+                }
+              }}
+              className="neu-pressable rounded-full w-10 h-10 flex items-center justify-center neu-text"
+              aria-label="Group video call"
+            >
               <Video size={18} />
             </button>
           </>

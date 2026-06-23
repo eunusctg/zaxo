@@ -3,39 +3,44 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Search, MessageSquarePlus, Archive, Pin, BellOff, Users, MoreVertical, Check, CheckCheck } from "lucide-react";
+import { Search, MessageSquarePlus, Archive, Pin, BellOff, Users, MoreVertical, Check, CheckCheck, Bell, BellRing, X, Phone, Video, MessageCircle } from "lucide-react";
 import { NeuButton, NeuInput } from "@/components/neumorphic";
 import { NeuAvatar } from "@/components/neumorphic/NeuAvatar";
 import { useAppStore } from "@/store/appStore";
 import { useUIStore } from "@/store/uiStore";
 import { useAuthStore } from "@/store/authStore";
-import { formatTime, formatDuration, getContactById } from "@/lib/zaxo/mockData";
+import { formatTime, formatDuration, getContactById, relativeTime } from "@/lib/zaxo/mockData";
+import { notifications } from "@/lib/zaxo/notifications";
 import type { Chat } from "@/types";
 
 export function ChatList() {
   const { chats, contacts } = useAppStore();
   const { showSearch, searchQuery, setShowSearch, setSubPanel, setSubPanel: sp } = useUIStore();
   const [menuOpenFor, setMenuOpenFor] = useState<string | null>(null);
+  const [showNotifPanel, setShowNotifPanel] = useState(false);
+  const [notifQueue, setNotifQueue] = useState<Array<{ id: string; category: string; title: string; body: string; timestamp: number; chatId?: string }>>([]);
+  const [notifPermission, setNotifPermission] = useState<NotificationPermission>("default");
 
-  // Simulate occasional incoming messages from random contacts to feel "realtime"
+  // Real cross-tab messages now flow via the realtime service in appStore.initRealtime().
+  // No more ambient simulated messages — open this app in two browser tabs to test
+  // real-time chat between them (each tab acts as a separate "device").
+
+  // Subscribe to in-app notification queue
   useEffect(() => {
-    const interval = setInterval(() => {
-      // 25% chance every 30s, only if user has chats
-      if (Math.random() < 0.25 && useAppStore.getState().chats.length > 0) {
-        const nonArchived = useAppStore.getState().chats.filter((c) => !c.isArchived && c.type === "individual");
-        if (nonArchived.length === 0) return;
-        const chat = nonArchived[Math.floor(Math.random() * nonArchived.length)];
-        const otherId = chat.participantIds[0];
-        const msgs = [
-          "Hey 👋", "What's up?", "You free?", "Did you see that?", "lol",
-          "👌", "👍", "Catch up later?", "Coffee?", "How's it going?",
-        ];
-        const text = msgs[Math.floor(Math.random() * msgs.length)];
-        useAppStore.getState().receiveMessage(chat.id, otherId, text);
-      }
-    }, 30000);
-    return () => clearInterval(interval);
+    const unsub = notifications.subscribeInApp((queue) => {
+      setNotifQueue(queue);
+    });
+    setNotifPermission(notifications.getPermission());
+    return () => unsub();
   }, []);
+
+  async function handleBellClick() {
+    if (notifications.getPermission() === "default") {
+      const p = await notifications.requestPermission();
+      setNotifPermission(p);
+    }
+    setShowNotifPanel(!showNotifPanel);
+  }
 
   const visibleChats = useMemo(() => {
     return chats
@@ -68,6 +73,18 @@ export function ChatList() {
         <h1 className="text-xl sm:text-2xl font-bold neu-text">Chats</h1>
         <div className="flex items-center gap-2">
           <button
+            onClick={handleBellClick}
+            className="neu-pressable rounded-full w-10 h-10 flex items-center justify-center neu-text relative"
+            aria-label="Notifications"
+          >
+            {notifQueue.length > 0 ? <BellRing size={18} className="neu-text-accent" /> : <Bell size={18} />}
+            {notifQueue.length > 0 && (
+              <span className="absolute -top-1 -right-1 bg-red-500 text-white text-[9px] font-bold rounded-full w-4 h-4 flex items-center justify-center">
+                {notifQueue.length > 9 ? "9+" : notifQueue.length}
+              </span>
+            )}
+          </button>
+          <button
             onClick={() => setShowSearch(!showSearch)}
             className="neu-pressable rounded-full w-10 h-10 flex items-center justify-center neu-text"
             aria-label="Search"
@@ -83,6 +100,84 @@ export function ChatList() {
           </button>
         </div>
       </header>
+
+      {/* Notification panel */}
+      <AnimatePresence>
+        {showNotifPanel && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: "auto", opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            className="px-3 sm:px-4 overflow-hidden"
+          >
+            <div className="neu-raised-sm rounded-2xl p-3">
+              <div className="flex items-center justify-between mb-2">
+                <div className="text-xs font-semibold neu-text-muted uppercase tracking-wider">Notifications</div>
+                <div className="flex items-center gap-2">
+                  {notifPermission !== "granted" && (
+                    <button
+                      onClick={async () => {
+                        const p = await notifications.requestPermission();
+                        setNotifPermission(p);
+                      }}
+                      className="text-[10px] neu-text-accent font-medium px-2 py-1 rounded-full neu-inset"
+                    >
+                      Enable system alerts
+                    </button>
+                  )}
+                  {notifQueue.length > 0 && (
+                    <button
+                      onClick={() => notifications.clearInApp()}
+                      className="text-[10px] neu-text-muted hover:neu-text-danger"
+                    >
+                      Clear all
+                    </button>
+                  )}
+                </div>
+              </div>
+              {notifQueue.length === 0 ? (
+                <div className="text-xs neu-text-muted py-4 text-center">No notifications yet</div>
+              ) : (
+                <div className="space-y-1 max-h-64 overflow-y-auto neu-scroll">
+                  {notifQueue.slice(0, 10).map((n) => (
+                    <button
+                      key={n.id}
+                      onClick={() => {
+                        if (n.chatId) setSubPanel({ type: "chat_room", chatId: n.chatId });
+                        notifications.dismissInApp(n.id);
+                        setShowNotifPanel(false);
+                      }}
+                      className="w-full flex items-start gap-2 px-2 py-2 rounded-xl hover:bg-[color:var(--neu-shadow-light)]/5 text-left"
+                    >
+                      <div className="w-8 h-8 rounded-full neu-inset flex items-center justify-center flex-shrink-0">
+                        {n.category === "call_incoming" || n.category === "call_group" || n.category === "call_missed" ? (
+                          <Phone size={14} className="neu-text-accent" />
+                        ) : n.category === "status" ? (
+                          <MessageCircle size={14} className="neu-text-accent" />
+                        ) : (
+                          <MessageCircle size={14} className="neu-text-accent" />
+                        )}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="text-xs font-medium neu-text truncate">{n.title}</div>
+                        <div className="text-[11px] neu-text-muted truncate">{n.body}</div>
+                        <div className="text-[10px] neu-text-muted opacity-60 mt-0.5">{relativeTime(n.timestamp)}</div>
+                      </div>
+                      <button
+                        onClick={(e) => { e.stopPropagation(); notifications.dismissInApp(n.id); }}
+                        className="neu-text-muted hover:neu-text-danger p-1"
+                        aria-label="Dismiss"
+                      >
+                        <X size={12} />
+                      </button>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Search bar */}
       <AnimatePresence>

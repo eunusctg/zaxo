@@ -11,6 +11,8 @@ import {
   MOCK_CALLS,
   MOCK_STATUSES,
 } from "@/lib/zaxo/mockData";
+import { realtime } from "@/lib/zaxo/realtime";
+import { notifications } from "@/lib/zaxo/notifications";
 
 function formatCallDuration(seconds: number): string {
   if (seconds === 0) return "0s";
@@ -65,6 +67,16 @@ interface AppState {
   blockContact: (contactId: string) => void;
   unblockContact: (contactId: string) => void;
   inviteContact: (contactId: string) => void;
+  findContactByZaxoNumber: (zaxoNumber: string) => Contact | undefined;
+  addContactByZaxoNumber: (zaxoNumber: string, displayName?: string) => Contact;
+  startChatWithZaxoNumber: (zaxoNumber: string) => string;
+
+  // Realtime bridging
+  initRealtime: (myUserId: string, myDisplayName: string) => void;
+  setContactPresence: (userId: string, online: boolean, lastSeen: number) => void;
+
+  // Group call
+  startGroupCall: (chatId: string, callType: "voice" | "video") => string;
 }
 
 export const useAppStore = create<AppState>()(
@@ -101,6 +113,8 @@ export const useAppStore = create<AppState>()(
               : c,
           ),
         }));
+        // Broadcast to other tabs (realtime)
+        realtime.sendMessage(chatId, newMsg);
         // Simulate near-instant delivery (50ms) + read receipt (300ms) — feels realtime
         setTimeout(() => {
           set((state) => ({
@@ -121,6 +135,8 @@ export const useAppStore = create<AppState>()(
               ),
             },
           }));
+          // Also broadcast read receipt
+          realtime.markRead(chatId, [newMsg.id]);
         }, 300);
       },
 
@@ -239,10 +255,10 @@ export const useAppStore = create<AppState>()(
       },
 
       setMyTyping: (chatId, typing) => {
-        // We use the chat's typingUserIds field but for the local user
-        // The actual transmission would go to the server in a real app
-        // For demo, we just clear the partner's typing indicator when the local user starts typing
-        if (typing) {
+        // Broadcast typing indicator to other tabs
+        realtime.setTyping(chatId, typing, "me");
+        // Clear local typing indicator after 2s if user stops
+        if (!typing) {
           set((state) => ({
             chats: state.chats.map((c) =>
               c.id === chatId ? { ...c, typingUserIds: c.typingUserIds.filter((id) => id !== "me") } : c,
@@ -304,6 +320,8 @@ export const useAppStore = create<AppState>()(
             }),
           },
         }));
+        // Broadcast reaction to other tabs
+        realtime.sendReaction(chatId, messageId, emoji, userId);
       },
 
       markChatRead: (chatId) => {
@@ -463,6 +481,156 @@ export const useAppStore = create<AppState>()(
       inviteContact: (contactId) => {
         // mock: would send SMS/email in production
         console.log(`[Zaxo] Invite sent to contact ${contactId}`);
+      },
+
+      findContactByZaxoNumber: (zaxoNumber) => {
+        const normalized = zaxoNumber.replace(/[\s-]/g, "");
+        return get().contacts.find((c) => c.zaxoNumber.replace(/[\s-]/g, "") === normalized);
+      },
+
+      addContactByZaxoNumber: (zaxoNumber, displayName) => {
+        const existing = get().findContactByZaxoNumber(zaxoNumber);
+        if (existing) return existing;
+        const id = `u_scan_${Date.now()}`;
+        const name = displayName || `Zaxo ${zaxoNumber.slice(-4)}`;
+        const newContact: Contact = {
+          id,
+          zaxoNumber,
+          displayName: name,
+          avatarColor: "linear-gradient(135deg, #6C5CE7 0%, #A29BFE 100%)",
+          avatarInitial: name.charAt(0).toUpperCase(),
+          about: "Hey there! I'm on Zaxo.",
+          online: false,
+          lastSeen: Date.now(),
+          isZaxoUser: true,
+          blocked: false,
+        };
+        set((state) => ({ contacts: [newContact, ...state.contacts] }));
+        return newContact;
+      },
+
+      startChatWithZaxoNumber: (zaxoNumber) => {
+        const contact = get().addContactByZaxoNumber(zaxoNumber);
+        return get().startChatWithContact(contact.id);
+      },
+
+      setContactPresence: (userId, online, lastSeen) => {
+        set((state) => ({
+          contacts: state.contacts.map((c) =>
+            c.id === userId ? { ...c, online, lastSeen } : c,
+          ),
+        }));
+      },
+
+      initRealtime: (myUserId, myDisplayName) => {
+        realtime.init(myUserId, myDisplayName);
+        // Subscribe to realtime events and bridge them into local state
+        realtime.subscribe((ev) => {
+          const state = get();
+          if (ev.kind === "message") {
+            // Incoming message from another tab
+            const msg = ev.message;
+            // Don't double-insert
+            const exists = (state.messages[msg.chatId] || []).some((m) => m.id === msg.id);
+            if (exists) return;
+            set((s) => ({
+              messages: {
+                ...s.messages,
+                [msg.chatId]: [...(s.messages[msg.chatId] || []), msg],
+              },
+              chats: s.chats.map((c) =>
+                c.id === msg.chatId
+                  ? {
+                      ...c,
+                      lastMessage: msg,
+                      updatedAt: msg.timestamp,
+                      unreadCount: (c.unreadCount || 0) + 1,
+                    }
+                  : c,
+              ),
+            }));
+            // Fire system notification
+            const contact = state.contacts.find((c) => c.id === msg.senderId);
+            const chat = state.chats.find((c) => c.id === msg.chatId);
+            const category = chat?.type === "group" ? "group_message" : "message";
+            const senderName = contact?.displayName || "Unknown";
+            const preview = msg.text || `[${msg.type}]`;
+            notifications.notify(
+              `n_${msg.id}`,
+              category,
+              chat?.type === "group" ? `${chat.name || "Group"}` : senderName,
+              chat?.type === "group" ? `${senderName}: ${preview}` : preview,
+              { chatId: msg.chatId, tag: msg.chatId },
+            );
+          } else if (ev.kind === "typing") {
+            set((s) => ({
+              chats: s.chats.map((c) => {
+                if (c.id !== ev.chatId) return c;
+                let typingIds = c.typingUserIds.filter((id) => id !== ev.userId);
+                if (ev.typing) typingIds = [...typingIds, ev.userId];
+                return { ...c, typingUserIds: typingIds };
+              }),
+            }));
+          } else if (ev.kind === "presence") {
+            // Update contact online status
+            set((s) => ({
+              contacts: s.contacts.map((c) =>
+                c.id === ev.userId ? { ...c, online: ev.online, lastSeen: ev.lastSeen } : c,
+              ),
+            }));
+          } else if (ev.kind === "read") {
+            // Mark messages as read by remote
+            set((s) => ({
+              messages: {
+                ...s.messages,
+                [ev.chatId]: (s.messages[ev.chatId] || []).map((m) =>
+                  ev.messageIds.includes(m.id) ? { ...m, status: "read" as const } : m,
+                ),
+              },
+            }));
+          } else if (ev.kind === "reaction") {
+            set((s) => ({
+              messages: {
+                ...s.messages,
+                [ev.chatId]: (s.messages[ev.chatId] || []).map((m) => {
+                  if (m.id !== ev.messageId) return m;
+                  const reactions = { ...m.reactions };
+                  if (reactions[ev.userId] === ev.emoji) {
+                    delete reactions[ev.userId];
+                  } else {
+                    reactions[ev.userId] = ev.emoji;
+                  }
+                  return { ...m, reactions };
+                }),
+              },
+            }));
+          } else if (ev.kind === "status_view") {
+            // Remote viewed my status
+            set((s) => ({
+              statuses: s.statuses.map((st) =>
+                st.id === ev.statusId && !st.viewers.includes(ev.viewerId)
+                  ? { ...st, viewers: [...st.viewers, ev.viewerId] }
+                  : st,
+              ),
+            }));
+          }
+        });
+      },
+
+      startGroupCall: (chatId, callType) => {
+        const chat = get().chats.find((c) => c.id === chatId);
+        if (!chat) return "";
+        const callId = `call_group_${Date.now()}`;
+        const myUser = "me";
+        // Send invite to all participants
+        chat.participantIds.forEach((pid) => {
+          if (pid !== myUser) {
+            realtime.inviteToCall(callId, "Me", callType, chatId, true);
+          }
+        });
+        // Insert system message
+        get().insertSystemMessage(chatId, `📞 Group ${callType} call started`);
+        return callId;
       },
     }),
     {

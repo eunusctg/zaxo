@@ -1,17 +1,26 @@
-// ==================== CALL SCREEN ====================
+// ==================== CALL SCREEN (REAL WebRTC) ====================
+// Real peer-to-peer audio/video calls via WebRTC.
+// Signaling flows through BroadcastChannel (realtime service).
+//   Outgoing: caller initiates → inviteToCall → wait for accept → createOffer
+//   Incoming: callee accepts → wait for offer → createAnswer
+// Both sides exchange ICE candidates and connect media streams.
+
 "use client";
 
 import { useEffect, useRef, useState, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Mic, MicOff, Video, VideoOff, Phone, PhoneOff, Volume2, VolumeX,
-  ChevronDown, ScreenShare, Users, SwitchCamera, UserPlus, Info,
+  ChevronDown, ScreenShare, UserPlus, Info,
 } from "lucide-react";
 import { NeuAvatar } from "@/components/neumorphic/NeuAvatar";
 import { useAppStore } from "@/store/appStore";
 import { useUIStore } from "@/store/uiStore";
 import { useAuthStore } from "@/store/authStore";
+import { useCallStateStore } from "@/store/callStateStore";
 import { getContactById, formatDuration } from "@/lib/zaxo/mockData";
+import { realtime } from "@/lib/zaxo/realtime";
+import { callEngine } from "@/lib/zaxo/callEngine";
 import type { Call } from "@/types";
 
 type CallState = "calling" | "ringing" | "connected" | "ended";
@@ -20,6 +29,7 @@ export function CallScreen({ otherUserId, callType }: { otherUserId: string; cal
   const { contacts, addCall, insertCallMessage } = useAppStore();
   const { setSubPanel } = useUIStore();
   const { user } = useAuthStore();
+  const { activeCall, setActiveCall } = useCallStateStore();
   const other = getContactById(otherUserId, contacts);
 
   const [state, setState] = useState<CallState>("calling");
@@ -30,6 +40,30 @@ export function CallScreen({ otherUserId, callType }: { otherUserId: string; cal
   const [minimized, setMinimized] = useState(false);
   const [camError, setCamError] = useState<string | null>(null);
   const [showInfo, setShowInfo] = useState(false);
+  const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null);
+  const [localStream, setLocalStream] = useState<MediaStream | null>(null);
+  const [connectionStatus, setConnectionStatus] = useState<string>("initializing");
+
+  // Determine if we're the caller or callee
+  const isIncoming = activeCall?.direction === "incoming";
+  const callId = activeCall?.callId || `call_${otherUserId}_${Date.now()}`;
+
+  // If no activeCall yet (e.g., user tapped call button), create one as outgoing
+  useEffect(() => {
+    if (!activeCall) {
+      setActiveCall({
+        callId,
+        otherUserId,
+        callType,
+        chatId,
+        isGroup: false,
+        direction: "outgoing",
+        state: "calling",
+        startedAt: Date.now(),
+      });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Find chatId for logging the call message
   const chatId = useAppStore.getState().chats.find(
@@ -37,66 +71,112 @@ export function CallScreen({ otherUserId, callType }: { otherUserId: string; cal
   )?.id;
 
   const localVideoRef = useRef<HTMLVideoElement>(null);
-  const localStreamRef = useRef<MediaStream | null>(null);
+  const remoteVideoRef = useRef<HTMLVideoElement>(null);
   const startTimeRef = useRef<number>(0);
+  const acceptedRef = useRef<boolean>(false);
+  const remoteUserIdRef = useRef<string>(otherUserId);
 
-  // Acquire local media (camera/mic) when video is on, or mic-only for voice
-  const acquireMedia = useCallback(async (withVideo: boolean) => {
-    // Release existing
-    if (localStreamRef.current) {
-      localStreamRef.current.getTracks().forEach((t) => t.stop());
-      localStreamRef.current = null;
-    }
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        audio: true,
-        video: withVideo ? { facingMode: "user", width: { ideal: 640 }, height: { ideal: 480 } } : false,
+  // Initialize call engine + acquire local media
+  useEffect(() => {
+    if (!other) return;
+    // For demo: use otherUserId as the remote. In a multi-tab scenario,
+    // the remote user's tab is identified by their zaxo number.
+    remoteUserIdRef.current = other.id;
+
+    // Initialize WebRTC peer connection
+    callEngine.init(callId, other.id, !isIncoming, {
+      onLocalStream: (stream) => {
+        setLocalStream(stream);
+        if (localVideoRef.current && callType === "video") {
+          localVideoRef.current.srcObject = stream;
+          localVideoRef.current.muted = true;
+          localVideoRef.current.play().catch(() => {});
+        }
+      },
+      onRemoteStream: (stream) => {
+        setRemoteStream(stream);
+        if (remoteVideoRef.current) {
+          remoteVideoRef.current.srcObject = stream;
+          remoteVideoRef.current.play().catch(() => {});
+        }
+        setState("connected");
+        startTimeRef.current = Date.now();
+        setConnectionStatus("connected");
+      },
+      onStateChange: (s) => {
+        setConnectionStatus(s);
+        if (s === "connected") {
+          setState("connected");
+          startTimeRef.current = Date.now();
+        } else if (s === "failed" || s === "disconnected") {
+          setConnectionStatus(s);
+        }
+      },
+    });
+
+    // Acquire local media (camera + mic)
+    callEngine.acquireLocalMedia(callType === "video" && videoOn)
+      .then(() => {
+        setCamError(null);
+        setConnectionStatus("local-ready");
+        // If caller: send invite + create offer immediately
+        if (!isIncoming) {
+          // Send invite via realtime (callerId, callType, chatId, isGroup)
+          realtime.inviteToCall(callId, user?.displayName || "Me", callType, chatId || "", false);
+          // Wait for the remote to accept, then create offer
+          const unsub = realtime.subscribe((ev) => {
+            if (ev.kind === "call_accept" && ev.callId === callId) {
+              if (!acceptedRef.current) {
+                acceptedRef.current = true;
+                setState("ringing");
+                setConnectionStatus("creating-offer");
+                setTimeout(() => callEngine.createOffer(), 200);
+              }
+            } else if (ev.kind === "call_sdp" && ev.callId === callId && ev.to === realtime.getMyUserId()) {
+              // Got SDP from callee — connection is being established
+              if (ev.sdp.type === "answer") {
+                setState("connected");
+                startTimeRef.current = Date.now();
+              }
+            } else if (ev.kind === "call_decline" && ev.callId === callId) {
+              setState("ended");
+              setTimeout(() => setSubPanel({ type: "none" }), 800);
+            }
+          });
+          return () => unsub();
+        } else {
+          // Incoming: we already accepted. Create answer when offer arrives.
+          setState("connected"); // assume connected; actual media connects on offer/answer
+          startTimeRef.current = Date.now();
+        }
+      })
+      .catch((err: unknown) => {
+        const e = err as DOMException;
+        if (e.name === "NotAllowedError") setCamError("Camera/microphone permission denied. Please allow access in browser settings.");
+        else if (e.name === "NotFoundError") setCamError("No camera/microphone found on this device.");
+        else setCamError(`Media error: ${e.message || "unknown"}`);
+        setConnectionStatus("media-error");
       });
-      localStreamRef.current = stream;
-      // Attach to local video element
-      if (localVideoRef.current && withVideo) {
-        localVideoRef.current.srcObject = stream;
-        localVideoRef.current.muted = true; // avoid echo
-        localVideoRef.current.play().catch(() => {});
-      }
-      setCamError(null);
-    } catch (err: unknown) {
-      const e = err as DOMException;
-      if (e.name === "NotAllowedError") setCamError("Camera/microphone permission denied. Please allow access in browser settings.");
-      else if (e.name === "NotFoundError") setCamError("No camera/microphone found on this device.");
-      else setCamError(`Media error: ${e.message || "unknown"}`);
-    }
+
+    return () => {
+      callEngine.endCall();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Apply mute toggle to actual track
   useEffect(() => {
-    if (localStreamRef.current) {
-      localStreamRef.current.getAudioTracks().forEach((t) => (t.enabled = !muted));
-    }
+    callEngine.toggleMute(muted);
   }, [muted]);
 
-  // Apply video toggle: re-acquire media when toggling
+  // Apply video toggle
   useEffect(() => {
-    if (state === "connected") {
-      acquireMedia(videoOn);
+    callEngine.toggleVideo(videoOn);
+    if (localVideoRef.current && localStream) {
+      localVideoRef.current.srcObject = videoOn ? localStream : null;
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [videoOn, state]);
-
-  // Call state machine — caller side: calling → ringing → connected
-  useEffect(() => {
-    if (state !== "calling") return;
-    acquireMedia(callType === "video" && videoOn);
-    // ringing after 1.5s
-    const t1 = setTimeout(() => setState("ringing"), 1500);
-    // connected after 3.5s (other side "picks up")
-    const t2 = setTimeout(() => {
-      setState("connected");
-      startTimeRef.current = Date.now();
-    }, 3500);
-    return () => { clearTimeout(t1); clearTimeout(t2); };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [videoOn]);
 
   // Call duration timer
   useEffect(() => {
@@ -108,22 +188,10 @@ export function CallScreen({ otherUserId, callType }: { otherUserId: string; cal
     }
   }, [state]);
 
-  // Cleanup on unmount
-  useEffect(() => {
-    return () => {
-      if (localStreamRef.current) {
-        localStreamRef.current.getTracks().forEach((t) => t.stop());
-        localStreamRef.current = null;
-      }
-    };
-  }, []);
-
   const handleEndCall = useCallback(() => {
-    // Stop media
-    if (localStreamRef.current) {
-      localStreamRef.current.getTracks().forEach((t) => t.stop());
-      localStreamRef.current = null;
-    }
+    callEngine.endCall();
+    realtime.endCall(callId);
+    realtime.sendCallState(callId, "ended");
     // Compute duration
     const duration = state === "connected"
       ? Math.floor((Date.now() - startTimeRef.current) / 1000)
@@ -132,20 +200,22 @@ export function CallScreen({ otherUserId, callType }: { otherUserId: string; cal
     setState("ended");
     // Log call
     const newCall: Call = {
-      id: `call_${Date.now()}`,
+      id: callId,
       otherUserId,
       type: callType,
-      direction: missed ? "missed" : "outgoing",
+      direction: missed ? "missed" : isIncoming ? "incoming" : "outgoing",
       timestamp: Date.now(),
       duration,
     };
     addCall(newCall);
     // Insert call system message in chat if chat exists
     if (chatId) {
-      insertCallMessage(chatId, callType, missed ? "missed" : "outgoing", duration);
+      insertCallMessage(chatId, callType, missed ? "missed" : isIncoming ? "incoming" : "outgoing", duration);
     }
+    // Clear active call state
+    setActiveCall(null);
     setTimeout(() => setSubPanel({ type: "none" }), 500);
-  }, [state, otherUserId, callType, addCall, insertCallMessage, chatId, setSubPanel]);
+  }, [state, otherUserId, callType, addCall, insertCallMessage, chatId, setSubPanel, callId, isIncoming, setActiveCall]);
 
   function statusText(): string {
     if (state === "calling") return "Calling…";
@@ -156,7 +226,7 @@ export function CallScreen({ otherUserId, callType }: { otherUserId: string; cal
 
   if (!other) return null;
 
-  const showVideo = callType === "video" && videoOn && state === "connected" && !camError;
+  const showVideo = callType === "video" && videoOn && !camError;
 
   return (
     <div
@@ -167,14 +237,24 @@ export function CallScreen({ otherUserId, callType }: { otherUserId: string; cal
           : "var(--neu-bg)",
       }}
     >
-      {/* Remote video (simulated placeholder — would be the other party's stream in production) */}
+      {/* Remote video (real WebRTC stream) */}
       {showVideo && (
-        <div className="absolute inset-0 flex items-center justify-center" style={{ background: "linear-gradient(135deg, #1a1c22 0%, #2d2d44 100%)" }}>
-          <div className="text-center">
-            <NeuAvatar initial={other.avatarInitial} gradient={other.avatarColor} size={140} />
-            <div className="text-white mt-4 text-lg font-medium">{other.displayName}</div>
-            <div className="text-white/60 text-sm">Remote video (waiting for peer)</div>
-          </div>
+        <div className="absolute inset-0 flex items-center justify-center" style={{ background: "#000" }}>
+          <video
+            ref={remoteVideoRef}
+            className="w-full h-full object-cover"
+            playsInline
+            autoPlay
+          />
+          {!remoteStream && (
+            <div className="absolute inset-0 flex items-center justify-center">
+              <div className="text-center">
+                <NeuAvatar initial={other.avatarInitial} gradient={other.avatarColor} size={140} />
+                <div className="text-white mt-4 text-lg font-medium">{other.displayName}</div>
+                <div className="text-white/60 text-sm">Waiting for peer video…</div>
+              </div>
+            </div>
+          )}
         </div>
       )}
 
@@ -196,6 +276,12 @@ export function CallScreen({ otherUserId, callType }: { otherUserId: string; cal
           {camError}
         </div>
       )}
+
+      {/* Connection status indicator */}
+      <div className="absolute top-3 left-1/2 -translate-x-1/2 z-30 px-3 py-1 rounded-full text-[10px] font-mono"
+        style={{ background: "rgba(0,0,0,0.4)", color: "white" }}>
+        ● {connectionStatus}
+      </div>
 
       {/* Header */}
       <header className="px-3 sm:px-4 pt-4 pb-2 flex items-center justify-between z-10 relative">
@@ -266,7 +352,7 @@ export function CallScreen({ otherUserId, callType }: { otherUserId: string; cal
             animate={{ opacity: 1 }}
             className="mt-2 text-xs text-white/50 neu-text-muted"
           >
-            🔒 End-to-end encrypted
+            🔒 End-to-end encrypted · WebRTC P2P
           </motion.div>
         )}
       </div>
@@ -342,11 +428,14 @@ export function CallScreen({ otherUserId, callType }: { otherUserId: string; cal
                 <div className="flex justify-between"><span className="neu-text-muted">Contact</span><span className="neu-text">{other.displayName}</span></div>
                 <div className="flex justify-between"><span className="neu-text-muted">Zaxo number</span><span className="neu-text font-mono">{other.zaxoNumber}</span></div>
                 <div className="flex justify-between"><span className="neu-text-muted">Type</span><span className="neu-text capitalize">{callType} call</span></div>
+                <div className="flex justify-between"><span className="neu-text-muted">Direction</span><span className="neu-text capitalize">{isIncoming ? "incoming" : "outgoing"}</span></div>
                 <div className="flex justify-between"><span className="neu-text-muted">Status</span><span className="neu-text capitalize">{state}</span></div>
+                <div className="flex justify-between"><span className="neu-text-muted">Connection</span><span className="neu-text font-mono">{connectionStatus}</span></div>
                 {state === "connected" && (
                   <div className="flex justify-between"><span className="neu-text-muted">Duration</span><span className="neu-text font-mono">{formatDuration(seconds)}</span></div>
                 )}
-                <div className="flex justify-between"><span className="neu-text-muted">Encryption</span><span className="neu-text-success">End-to-end</span></div>
+                <div className="flex justify-between"><span className="neu-text-muted">Encryption</span><span className="neu-text-success">End-to-end (DTLS-SRTP)</span></div>
+                <div className="flex justify-between"><span className="neu-text-muted">Transport</span><span className="neu-text-success">WebRTC P2P</span></div>
               </div>
               <button
                 onClick={handleEndCall}

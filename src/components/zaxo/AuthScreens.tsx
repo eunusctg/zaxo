@@ -187,7 +187,7 @@ export function EmailAuthScreen() {
         <p className="text-sm neu-text-muted mt-1">
           {mode === "signup"
             ? "Get your permanent Zaxo number in seconds."
-            : "Sign in to continue to Zaxo."}
+            : "Welcome back. Sign in to continue."}
         </p>
 
         <div className="flex gap-2 mt-6 p-1.5 neu-well rounded-2xl">
