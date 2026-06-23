@@ -52,3 +52,17 @@ prompt
 server.log
 # Skills directory
 /skills/
+# Zaxo-specific build artifacts
+/download/
+/scripts/
+/tool-results/
+/upload/
+/worklog.md
+/dev.log
+/server.log
+/tsconfig.tsbuildinfo
+/skills/
+/.zscripts/
+/zaxo-android/
+*.apk
+*.tar.gz
